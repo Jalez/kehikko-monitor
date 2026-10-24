@@ -1,27 +1,27 @@
-import { afterAll, describe, expect, test } from 'bun:test'
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { describe, expect, test } from 'bun:test'
 
 import { skillPath, skillTextIssue } from 'kehikot-module-protocol'
 
-import { ASK, MANIFEST, TICKET, answer, saidNotes, servingAt } from '../doors.ts'
+import { ASK, CLOCK, MANIFEST, answer, callerNamed, servingAt, trafficSaid } from '../doors.ts'
 import { ID } from '../manifest.ts'
-import type { Note } from '../store.ts'
+import { call, polling } from './fixtures.ts'
 
-const project = realpathSync(mkdtempSync(join(tmpdir(), 'kehikko-example-doors-')))
-afterAll(() => rmSync(project, { recursive: true, force: true }))
+const NOW = 2_000_000_000
+CLOCK.now = () => NOW
 
-/* A host that holds exactly one project, and no conversation with a place: the door asks it, never a real one. */
+/** What the stand-in host was asked, and what it answers: the record, or a refusal. */
+const asked: Record<string, unknown>[] = []
+let refusal: { reason: string; error: string; refused?: string } | null = null
+const RECORD = [...polling(NOW, 2000, 20), call({ at: NOW - 500, by: 'kehikko', side: 'out', via: 'server', kind: 'gh api', host: 'api.github.com', path: '/repos/a/b/releases', reason: 'GitHub releases: a/b', reported: 'host' })]
+
 ASK.options = {
   env: { KEHIKOT_ORIGINS: 'http://127.0.0.1:1' },
-  fetch: (async (input: string | URL | Request) => {
+  fetch: (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input))
-    if (url.pathname === '/host/is-project') {
-      const path = url.searchParams.get('path')
-      return Response.json(path === project ? { ok: true, project: true, path } : { ok: true, project: false })
-    }
-    return Response.json({ ok: true, place: null })
+    if (url.pathname !== '/host/server-ask') return Response.json({ ok: false }, { status: 404 })
+    asked.push(JSON.parse(String(init?.body)))
+    if (refusal) return Response.json({ ok: false, ...refusal })
+    return Response.json({ ok: true, data: { calls: RECORD, newest: RECORD.length, oldest: 1, kept: 5000, started: 1, budgets: [{ name: 'GitHub API without an account', used: 3, limit: 30, left: 27, resets: null, note: '' }] } })
   }) as typeof fetch,
 }
 
@@ -29,7 +29,7 @@ const none = new URLSearchParams()
 
 async function rpc(method: string, params: Record<string, unknown> = {}) {
   const reply = await answer('POST', '/mcp', none, { jsonrpc: '2.0', id: 1, method, params }, null)
-  return reply?.body as { result: { tools?: { name: string; annotations?: { readOnlyHint?: boolean }; inputSchema: { properties: object } }[]; content?: { text: string }[]; isError?: boolean } }
+  return reply?.body as { result: { tools?: { name: string; annotations?: { readOnlyHint?: boolean } }[]; content?: { text: string }[]; isError?: boolean } }
 }
 
 describe('the doors', () => {
@@ -43,54 +43,54 @@ describe('the doors', () => {
     expect((await answer('GET', '/api/nothing', none, null, null))?.status).toBe(404)
   })
 
-  test('only this page writes: without its ticket a write is refused, with it the note is kept', async () => {
-    const body = { projectPath: project, op: 'add', text: 'Ask about the deadline', epic: 'launch', parts: ['design'] }
-    expect((await answer('POST', '/api/notes', none, body, null))?.status).toBe(403)
-    expect((await answer('POST', '/api/notes', none, body, 'not-the-ticket'))?.status).toBe(403)
-    expect((await answer('POST', '/api/notes', none, body, TICKET))?.status).toBe(200)
-    const read = await answer('GET', '/api/notes', new URLSearchParams({ projectPath: project }), null, null)
-    expect((read?.body as { notes: Note[] }).notes.map((note) => note.text)).toEqual(['Ask about the deadline'])
-  })
-
-  test('a malformed edit is refused with a sentence', async () => {
-    const reply = await answer('POST', '/api/notes', none, { projectPath: project, op: 'rename' }, TICKET)
-    expect(reply?.status).toBe(400)
-  })
-
-  test('the MCP door lists one read-only tool that takes project and epic', async () => {
+  test('the MCP door lists one read-only tool, traffic', async () => {
     expect((await answer('GET', '/mcp', none, null, null))?.status).toBe(405)
     const tools = (await rpc('tools/list')).result.tools!
-    expect(tools.map((one) => one.name)).toEqual(['list_notes'])
-    for (const tool of tools) expect(tool.annotations?.readOnlyHint).toBe(true)
-    expect(Object.keys(tools[0]!.inputSchema.properties)).toEqual(['project', 'epic'])
+    expect(tools.map((one) => one.name)).toEqual(['traffic'])
+    expect(tools[0]!.annotations?.readOnlyHint).toBe(true)
   })
 
-  test('list_notes answers for a project the host holds, and refuses one it does not', async () => {
-    const said = await rpc('tools/call', { name: 'list_notes', arguments: { project, epic: 'launch' } })
+  test('traffic reads the host’s record as Monitor, about no project, and says what repeats', async () => {
+    refusal = null
+    asked.length = 0
+    const said = await rpc('tools/call', { name: 'traffic', arguments: {} })
     expect(said.result.isError).toBeUndefined()
-    expect(said.result.content?.[0]?.text).toContain('Ask about the deadline')
-    const refused = await rpc('tools/call', { name: 'list_notes', arguments: { project: '/not/a/project' } })
-    expect(refused.result.isError).toBe(true)
-    const unnamed = await rpc('tools/call', { name: 'list_notes', arguments: {} })
-    expect(unnamed.result.isError).toBe(true)
+    const text = said.result.content![0]!.text
+    expect(text).toContain('Kanban asks Kehikot /host/call (tracker.get) every 2 s — 20 times, getting the same answer each time')
+    expect(text).toContain('GitHub API without an account: 3 used, 27 left of 30 an hour.')
+    expect(asked[0]).toMatchObject({ module: ID, method: 'traffic.read' })
+    expect(asked[0]).not.toHaveProperty('project')
+  })
+
+  test('a host that refuses says so in words, as an error the agent reads', async () => {
+    refusal = { reason: 'failed', error: 'This module’s manifest does not ask for traffic:read.', refused: 'grant' }
+    const said = await rpc('tools/call', { name: 'traffic', arguments: {} })
+    expect(said.result.isError).toBe(true)
+    expect(said.result.content![0]!.text).toContain('did not let Monitor read its traffic')
+    refusal = null
   })
 
   test('each skill is served at its path, with the origin filled in and a text a host accepts', async () => {
-    /* Said once the server listens: the manifest's versions follow the origin really bound. */
-    servingAt('http://127.0.0.1:9520')
+    servingAt('http://127.0.0.1:8070')
     for (const skill of MANIFEST.declares.skills ?? []) {
       const reply = await answer('GET', skillPath(skill.name), none, null, null)
       const text = reply?.raw?.bytes as string
       expect(skillTextIssue(text, skill.name)).toBeNull()
-      expect(text).not.toContain('{{origin}}')
-      expect(text).toContain('http://127.0.0.1:9520')
-      expect(text).toContain(`[skill ${skill.version}]`)
+      expect(text).toContain('http://127.0.0.1:8070')
+      expect(text).toContain('mcp__monitor__traffic')
     }
   })
+})
 
-  test('the answer says each note as text, with its state and parts', () => {
-    const note: Note = { id: '1', text: 'Check <b>this</b>', epic: 'e', parts: ['p'], done: false, at: '2026-01-01T00:00:00Z' }
-    expect(saidNotes([note], 'e', [])).toBe('- [open] "Check <b>this</b>" (parts: p) — epic e')
-    expect(saidNotes([note], 'other', [])).toBe('No notes are kept for the epic other.')
+describe('what traffic says', () => {
+  const read = { calls: RECORD, newest: RECORD.length, oldest: 1, gap: false, kept: 5000, started: 1, budgets: [], processes: null }
+
+  test('one view at a time, a caller by id or name, words, and a sentence for a caller not seen', () => {
+    expect(trafficSaid(read, { view: 'calls', caller: 'Kehikot' }, NOW)).toContain('Kehikot called gh api api.github.com/repos/a/b/releases')
+    expect(trafficSaid(read, { view: 'calls', text: 'releases' }, NOW)).toContain('The newest 1 of 1 calls')
+    expect(trafficSaid(read, { view: 'summary' }, NOW)).toContain('Kanban (kehikot.kanban): 20 calls')
+    expect(trafficSaid(read, { view: 'repeats' }, NOW)).not.toContain('Callers in the last')
+    expect(trafficSaid(read, { caller: 'Nobody' }, NOW)).toContain('No call by "Nobody"')
+    expect(callerNamed('kanban', ['kehikot.kanban', 'kehikko'])).toBe('kehikot.kanban')
   })
 })

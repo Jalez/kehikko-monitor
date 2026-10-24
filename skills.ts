@@ -21,8 +21,8 @@ import { PREFERRED_PORT } from './manifest.ts'
  * origin, shows it, and installs it on the person's press (or keeps it installed
  * when they chose that in Settings). This module installs nothing itself.
  *
- * Name every skill after the module (`example`, `example-<verb>`), so a person
- * can tell from `/example…` whose it is.
+ * Name every skill after the module (`monitor`, `monitor-<verb>`), so a person
+ * can tell from `/monitor…` whose it is.
  */
 
 export const PLUGIN_DIR = join(import.meta.dirname, 'plugin')
@@ -31,8 +31,8 @@ export const VERSION_SLOT = '{{version}}'
 
 export const OFFERED = [
   {
-    name: 'example',
-    summary: 'Type /example: an agent reads the notes kept about this epic and tells you which are still open.',
+    name: 'monitor',
+    summary: 'Type /monitor: an agent reads what Kehikot and its modules are calling, and tells you what repeats.',
   },
 ] as const
 

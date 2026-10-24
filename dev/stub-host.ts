@@ -97,9 +97,26 @@ const page = `<!doctype html>
       });
     });
   }
+  /* Made-up traffic, so the page has something to draw: a module polling the host every 2 s, the
+     host's page asking now and then, and a release list read with a 304 once a minute. */
+  var started = Date.now(), rows = [], seq = 0, made = started - 1;
+  function row(at, more) { seq++; rows.push(Object.assign({ seq: seq, at: at, ms: 2, reason: null, kind: 'GET', host: '127.0.0.1:4180', path: '/', status: 200, ok: true, by: 'kehikko', via: 'page', side: 'in', reported: 'host' }, more)); }
+  function traffic(params) {
+    var now = Date.now();
+    for (var t = Math.floor(made / 1000) * 1000 + 1000; t <= now; t += 1000) {
+      if ((t / 1000) % 2 === 0) row(t, { by: 'kehikot.kanban', kind: 'POST', path: '/host/call', reason: 'tracker.get', bytesOut: 512 });
+      if ((t / 1000) % 7 === 0) row(t + 120, { path: '/host/quiet?project=…', reason: 'the page asks whether modules are quiet' });
+      if ((t / 1000) % 60 === 0) row(t + 300, { side: 'out', via: 'server', host: 'api.github.com', path: '/repos/owner/repo/releases', status: 304, cache: 'not-modified', reason: 'GitHub releases: owner/repo', reported: 'host' });
+    }
+    made = now;
+    if (rows.length > 5000) rows = rows.slice(-5000);
+    var since = params.since || 0;
+    return { calls: rows.filter(function (r) { return r.seq > since; }), newest: seq, oldest: rows.length ? rows[0].seq : 0, gap: false, kept: 5000, started: started,
+      budgets: [{ name: 'GitHub API without an account', used: 2, limit: 30, left: 28, resets: null, note: 'Made up by the stub host.' }], processes: null };
+  }
   frame.addEventListener('load', function () {
     send({ type: '${MESSAGE.HELLO}', protocol: ${PROTOCOL}, session: 'stub', context: context(), state: kept,
-      answers: ['state.set', 'activity.set'], header: true });
+      answers: ['state.set', 'activity.set', 'traffic.read'], header: true });
   });
   addEventListener('message', function (event) {
     if (event.source !== frame.contentWindow) return;
@@ -115,7 +132,8 @@ const page = `<!doctype html>
       document.getElementById('inbox').textContent = items.length ? items.map(function (i) { return i.state + ': ' + i.label; }).join(' | ') : '(empty)';
       return answer({ outcome: 'taken', taken: items.length, why: '' });
     }
-    send({ type: '${MESSAGE.RESPONSE}', id: d.id, ok: false, reason: 'unknown-method', error: 'the stub host answers state.set and activity.set' });
+    if (d.method === 'traffic.read') return answer(traffic(d.params || {}));
+    send({ type: '${MESSAGE.RESPONSE}', id: d.id, ok: false, reason: 'unknown-method', error: 'the stub host answers state.set, activity.set and traffic.read' });
   });
 })();
 </script></body></html>`

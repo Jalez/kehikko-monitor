@@ -1,52 +1,43 @@
 import { describe, expect, test } from 'bun:test'
-import { HEADER_MENUS, LIMITS } from 'kehikot-module-protocol'
 
-import { LABEL_FIT, SHOWING, headerItems, pressed } from '../src/header.ts'
+import { headerItemsSchema } from 'kehikot-module-protocol'
 
-/*
- * The host draws a container's header in one row, at every width a person
- * drags it to: words at 300 pixels and up, icons under 300, one "⋯" under 220,
- * and pinned runs only at 360 and up. What a module controls is what goes in
- * it, so that is what is held here, at 380, 280 and 200 pixels.
- */
-const WIDTHS = [380, 280, 200] as const
-const mode = (width: number) => (width < 220 ? 'merged' : width < 300 ? 'icons' : 'words')
+import { CALLERS_LISTED, EVERY, LABEL_FIT, callerOption, headerItems, pressed } from '../src/header.ts'
+
+const state = { range: 5 as const, paused: false, caller: null, callers: ['kehikko', 'kehikot.kanban', ''] }
 
 describe('the header', () => {
-  test('one View switch, on the view the page is showing', () => {
-    for (const showing of SHOWING) {
-      const items = headerItems(showing)
-      expect(items.map((item) => `${HEADER_MENUS[item.kind]}:${item.id}`)).toEqual(['view:show'])
-      expect(items[0]?.kind === 'switch' && items[0].value).toBe(showing)
-    }
+  test('range, pause and caller for agents; Clear is the person’s', () => {
+    const items = headerItems(state)
+    expect(headerItemsSchema.safeParse(items).success).toBe(true)
+    expect(items.map((item) => [item.id, item.kind, item.agents === true])).toEqual([
+      ['range', 'switch', true],
+      ['pause', 'toggle', true],
+      ['caller', 'switch', true],
+      ['clear', 'run', false],
+    ])
   })
 
-  test('fits at 380, 280 and 200 pixels: short labels, and nothing pinned beyond what a narrow header drops', () => {
-    for (const width of WIDTHS) {
-      const items = headerItems('open')
-      /* Under 360 pixels the host draws no pinned run; at most PINNED_MAX above it. */
-      const pinned = items.filter((item) => item.kind === 'run' && item.pinned)
-      expect(pinned.length).toBeLessThanOrEqual(width >= 360 ? LIMITS.PINNED_MAX : items.length)
-      for (const item of items) {
-        expect(item.label.length).toBeLessThanOrEqual(LABEL_FIT)
-        for (const option of 'options' in item ? item.options : []) expect(option.label.length).toBeLessThanOrEqual(LABEL_FIT)
-        /* A pinned run is drawn as an icon button: it needs an icon at every width. */
-        if (item.kind === 'run' && item.pinned) expect(item.icon).toBeDefined()
-      }
-      expect(['words', 'icons', 'merged']).toContain(mode(width))
+  test('every label reads in a narrow menu, however many callers', () => {
+    const many = Array.from({ length: 30 }, (_, i) => `kehikot.a-module-with-a-very-long-name-${i}`)
+    const items = headerItems({ ...state, callers: many })
+    for (const item of items) {
+      expect(item.label.length).toBeLessThanOrEqual(LABEL_FIT)
+      if ('options' in item) for (const option of item.options) expect(option.label.length).toBeLessThanOrEqual(LABEL_FIT)
     }
+    const caller = items.find((item) => item.id === 'caller')!
+    expect('options' in caller && caller.options.length).toBe(CALLERS_LISTED + 1)
   })
 
-  test('only a harmless item is marked for agents, and never a confirmed run', () => {
-    for (const item of headerItems('all')) {
-      if (item.kind === 'run') expect(item.agents && item.confirm).toBeFalsy()
-      if (item.agents) expect(item.kind === 'switch' || item.kind === 'go' || item.kind === 'toggle').toBe(true)
-    }
-  })
-
-  test('a press is a view, or a sentence saying why it was not taken', () => {
-    expect(pressed('show', 'all')).toBe('all')
-    expect(pressed('show', 'everything')).toContain('not a view')
-    expect(pressed('other', 'all')).toContain('nothing called')
+  test('a press asks for what it says, and anything else is a sentence', () => {
+    expect(pressed('range', 'm15', state.callers)).toEqual({ range: 15 })
+    expect(pressed('range', 'm7', state.callers)).toBeTypeOf('string')
+    expect(pressed('pause', true, state.callers)).toEqual({ paused: true })
+    expect(pressed('caller', EVERY, state.callers)).toEqual({ caller: null })
+    expect(pressed('caller', callerOption('kehikot.kanban'), state.callers)).toEqual({ caller: 'kehikot.kanban' })
+    expect(pressed('caller', callerOption(''), state.callers)).toEqual({ caller: '' })
+    expect(pressed('caller', 'kehikot.none', state.callers)).toBeTypeOf('string')
+    expect(pressed('clear', undefined, state.callers)).toEqual({ clear: true })
+    expect(pressed('nothing', undefined, state.callers)).toBeTypeOf('string')
   })
 })
