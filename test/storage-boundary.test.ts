@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 /*
@@ -44,9 +44,9 @@ describe('the storage boundary', () => {
     expect(found).toEqual([])
   })
 
-  test('the store builds its path with the protocol\'s helpers', () => {
-    const store = readFileSync(join(ROOT, 'store.ts'), 'utf8')
-    expect(store).toMatch(/\bmoduleDir\b/)
-    expect(store).toMatch(/\bmoduleFile\b/)
+  test('Monitor keeps nothing in a project: no store, and nothing that writes a file', () => {
+    expect(existsSync(join(ROOT, 'store.ts'))).toBe(false)
+    const written = sources(ROOT).filter((path) => /\b(?:writeFileSync|appendFileSync|Bun\.write|mkdirSync)\(/.test(readFileSync(path, 'utf8')))
+    expect(written.map((path) => relative(ROOT, path))).toEqual([])
   })
 })

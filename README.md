@@ -1,59 +1,53 @@
-# Example — a Kehikot module
+# Monitor — a Kehikot module
 
-<!-- One paragraph: what a person gets from this module, in their words. Rewrite it when you make the module yours. -->
-Short notes about the epic you are working on, kept with the project and filed
-under the parts of the epic you had picked when you wrote them.
+See what Kehikot and its modules are calling on your computer, live: who made
+each call, what kind, to where, and for what reason — and which calls are made
+again and again, so redundant polling stands out.
 
-- **Follows the parts you pick.** Pick parts in Kehikot's bar and Example shows
-  only the notes written under them; with none picked, the whole epic.
-- **Open notes wait in your Inbox.** Each open note of the epic is in Kehikot's
-  Inbox until you tick it off.
-- **View › Open notes / All notes.** One switch in the container's header.
-- **Agents read, you write.** An agent on the kehikko reads the notes with
-  `list_notes`; adding, finishing and removing are yours.
+- **A live timeline.** Calls per second over the last 5, 15 or 60 minutes,
+  stacked by caller. Free calls — answered from a cache, a 304, or held back by
+  the GitHub budget — are hatched, so they read apart without colour.
+- **Repeats.** The same caller asking the same thing five or more times in two
+  minutes, in a sentence: "Kanban asks Kehikot /host/call (tracker.get) every
+  2 s — 30 times, getting the same answer each time".
+- **Callers.** Each caller's calls a minute, bytes, share of free calls and
+  calls that came with no reason, and how much of the GitHub budget is used.
+- **Every call.** Newest first, filtered by caller and by words; a row opens
+  to show who, why, where, the answer and whether it was free.
+- **Connections nobody reported.** What Kehikot sees open on its own processes
+  and each module's, marked "no reason given".
+- **Header.** Range, Paused and Caller in View; Clear in Run (yours only).
+- **Agents ask, you watch.** The `traffic` tool answers "what is polling too
+  much" from the same record; it reads only.
+
+Everything stays on this computer. Kehikot keeps the record in its own memory
+(the last 5,000 calls): addresses and reasons, never what a call carried — no
+bodies, headers, tokens or query values.
 
 ## Skills
 
-<!-- One bullet per skill: what typing it does. Only a person runs a skill. -->
-- **`/example`**: an agent reads the notes of this epic and tells you which are
-  still open. Offered in Kehikot's Settings › Skills like any module's.
+- **`/monitor`**: an agent reads what repeats and who calls the most, and tells
+  you in a few lines. Offered in Kehikot's Settings › Skills like any module's.
 
 ## Data
 
-<!-- Every file this module keeps, and where. Only ever under .kehikot/<folder>/. -->
-- `<project>/.kehikot/example/notes.json` — the notes, with the epic and parts
-  each was written under.
+None. Monitor keeps nothing in a project and writes no file: it reads
+Kehikot's record of traffic (`traffic.read`, protocol 2.20.0).
 
 ## Try it
 
 1. `bun install`, then `bun run stub`: the module, framed the way Kehikot frames
-   it, with a project, an epic and three parts to pick.
-2. Push the repository to GitHub, then in Kehikot: the modules list › **Install
-   from repository…** › `owner/repo`. Kehikot reads it with your own `gh`,
-   installs its newest release (or `main`, before the first), and starts it.
+   it, with made-up traffic.
+2. In Kehikot: the modules list › **Install from repository…** ›
+   `Jalez/kehikko-monitor`. It needs a Kehikot on protocol 2.20.0 or later.
 
 ## Development
 
 ```
-bun test               # the manifest, the doors, the store, the storage boundary, the header, the Inbox, the page
+bun test               # the model, the doors, the header, reading the record, the page, the storage boundary
 bun run typecheck
 bun run stub           # look at it, framed, without Kehikot
 ```
 
 How it is built and released, and the rules a change keeps: [CLAUDE.md](CLAUDE.md).
 The whole guide: [Building a module](https://github.com/Jalez/kehikko-protocol/blob/main/docs/building-a-module.md).
-
-## Starting a module from this template
-
-This repository is a GitHub template. Make yours with
-`gh repo create <owner>/kehikko-<name> --template Jalez/kehikko-module-template --private --clone`
-(or `--public`), then, inside it:
-
-```
-bun install
-bun run rename <name>      # the id, the name, the data folder, the skill and a free port
-bun install && bun test
-```
-
-Or type `/kehikot-module` in Claude Code: Kehikot's own skill asks what the
-module is for, writes a one-page design with you, and builds it from here.

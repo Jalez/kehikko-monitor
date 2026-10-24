@@ -1,96 +1,81 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-
-import type { EpicPart } from 'kehikot-module-protocol'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 import { Screen } from '../src/app.tsx'
-import type { Api } from '../src/wire/api.ts'
+import { headerItems, type HeaderState } from '../src/header.ts'
 import type { Host } from '../src/wire/use-kehikot.ts'
-import type { Edit, Note } from '../store.ts'
+import type { Traffic } from '../src/wire/use-traffic.ts'
+import { call, polling } from './fixtures.ts'
 
 afterEach(cleanup)
 
-const parts: EpicPart[] = [
-  { id: 'design', heading: 'Design', refs: [], picked: false },
-  { id: 'build', heading: 'Build', refs: [], picked: false },
-]
+const NOW = 2_000_000_000
 
 function host(over: Partial<Host> = {}): Host {
-  return {
-    where: 'hosted',
-    project: 'Thesis',
-    projectPath: '/work/thesis',
-    epic: 'launch',
-    parts,
-    picked: [],
-    theme: 'light',
-    header: () => {},
-    activity: () => {},
-    ...over,
-  }
+  return { where: 'hosted', projectPath: null, theme: 'light', header: () => {}, request: async () => ({}), ...over }
 }
 
-const note = (id: string, text: string, notePart: string[] = [], done = false): Note => ({ id, text, epic: 'launch', parts: notePart, done, at: '2026-10-01T10:00:00Z' })
+const traffic = (over: Partial<Traffic> = {}): Traffic => ({
+  calls: [...polling(NOW, 2000, 20), call({ at: NOW - 900, by: 'kehikko', side: 'out', via: 'server', kind: 'GET', host: 'api.github.com', path: '/repos/a/b/releases', status: 304, cache: 'not-modified', reason: 'GitHub releases: a/b' })],
+  budgets: [{ name: 'GitHub API without an account', used: 4, limit: 30, left: 26, resets: null, note: 'Only when gh is not signed in.' }],
+  processes: { on: true, bytes: true, at: NOW, why: '', connections: [{ by: 'kehikot.browser', pid: 700, process: 'Google Chrome', proto: 'tcp', remote: 'github.com', port: 443, local: false, bytesIn: 4000, bytesOut: 500, since: NOW }] },
+  problem: null,
+  gap: false,
+  at: NOW,
+  ...over,
+})
 
-function fakeApi(notes: Note[], edits: Edit[] = []): Api {
-  return { read: () => Promise.resolve(notes), edit: (_, one) => (edits.push(one), Promise.resolve(notes)) }
+const state: HeaderState = { range: 5, paused: false, caller: null, callers: ['kehikot.kanban', 'kehikko'] }
+
+function draw(over: { host?: Partial<Host>; traffic?: Partial<Traffic>; state?: Partial<HeaderState> } = {}, onShow = () => {}) {
+  const s = { ...state, ...over.state }
+  return render(
+    <Screen host={host(over.host)} traffic={traffic(over.traffic)} items={headerItems(s)} state={s} order={['kehikot.kanban', 'kehikko']} filter={{ by: null, text: '' }} onShow={onShow} now={NOW} />,
+  )
 }
 
 describe('the screen', () => {
-  test('says where the host put it: project, epic, and "the whole epic" when no part is picked', async () => {
-    render(<Screen host={host()} api={fakeApi([])} />)
-    expect(screen.getByTestId('project').textContent).toBe('Thesis')
-    expect(screen.getByTestId('epic').textContent).toBe('launch')
-    expect(screen.getByTestId('parts').textContent).toBe('the whole epic')
-    await waitFor(() => screen.getByText('No open notes.'))
+  test('the timeline, named and described for a screen reader, with every caller in its legend', () => {
+    draw()
+    expect(screen.getByRole('heading', { name: 'Calls per second' })).toBeTruthy()
+    expect(screen.getByRole('img').getAttribute('aria-label')).toContain('by caller')
+    const legend = screen.getByRole('list', { name: 'Callers' })
+    expect(legend.textContent).toContain('Kanban')
+    expect(legend.textContent).toContain('Kehikot')
+    expect(legend.textContent).toContain('Hatched: free')
   })
 
-  test('narrows to the picked parts, and says so when the pick leaves nothing', async () => {
-    const picked = parts.map((one) => ({ ...one, picked: one.id === 'build' }))
-    render(<Screen host={host({ parts: picked, picked: ['Build'] })} api={fakeApi([note('a', 'In design', ['design']), note('b', 'Everywhere')])} />)
-    await waitFor(() => screen.getByText('Everywhere'))
-    expect(screen.queryByText('In design')).toBeNull()
+  test('repeats first: the module polling the host, in a sentence, with a way to its calls', () => {
+    let shown = ''
+    draw({}, ((repeat: { said: string }) => (shown = repeat.said)) as never)
+    expect(screen.getByText('Kanban asks Kehikot /host/call (tracker.get) every 2 s — 20 times, getting the same answer each time')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^Show these calls/ }))
+    expect(shown).toContain('Kanban asks')
+  })
+
+  test('the callers table and the GitHub budget say the numbers in text', () => {
+    draw()
+    expect(screen.getAllByRole('table')[0]!.textContent).toContain('Kanban')
+    expect(screen.getByText('4 used, 26 left of 30 an hour')).toBeTruthy()
+    expect(screen.getByRole('meter').getAttribute('aria-valuenow')).toBe('4')
+  })
+
+  test('connections nobody reported, by caller', () => {
+    draw()
+    expect(screen.getByRole('heading', { name: /Open connections/ })).toBeTruthy()
+    expect(screen.getByText('Google Chrome')).toBeTruthy()
+  })
+
+  test('paused says so; a host that keeps no record says what to do', () => {
+    draw({ state: { paused: true } })
+    expect(screen.getByText(/Paused: the picture stands still/)).toBeTruthy()
     cleanup()
-    render(<Screen host={host({ parts: picked, picked: ['Build'] })} api={fakeApi([note('a', 'In design', ['design'])])} />)
-    await waitFor(() => screen.getByText('No note is in the picked part.'))
+    draw({ traffic: { calls: [], problem: 'This Kehikot keeps no record of traffic yet. Update Kehikot to see it.' } })
+    expect(screen.getByRole('status').textContent).toContain('Update Kehikot')
   })
 
-  test('a note is drawn as text, never as markup', async () => {
-    render(<Screen host={host()} api={fakeApi([note('a', '<b>bold</b>')])} />)
-    await waitFor(() => screen.getByText('<b>bold</b>'))
-  })
-
-  test('a new note is filed under the parts picked when it was written', async () => {
-    const edits: Edit[] = []
-    const picked = parts.map((one) => ({ ...one, picked: one.id === 'design' }))
-    render(<Screen host={host({ parts: picked, picked: ['Design'] })} api={fakeApi([], edits)} />)
-    await waitFor(() => screen.getByLabelText('A new note'))
-    fireEvent.change(screen.getByLabelText('A new note'), { target: { value: 'Pick a colour' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    await waitFor(() => expect(edits).toEqual([{ op: 'add', text: 'Pick a colour', epic: 'launch', parts: ['design'] }]))
-  })
-
-  test('the open notes are reported to the Inbox, whole', async () => {
-    const reported: unknown[][] = []
-    render(<Screen host={host({ activity: (items) => reported.push(items) })} api={fakeApi([note('a', 'Open'), note('b', 'Done', [], true)])} />)
-    await waitFor(() => expect(reported.at(-1)?.length).toBe(1))
-  })
-
-  test('each not-ready moment is the shared cover, with nothing to save into', () => {
-    const none = { projectPath: null, project: null, epic: null }
-    for (const [where, state] of [['listening', 'waiting'], ['unhosted', 'unhosted'], ['hosted', 'no-project']] as const) {
-      const { container } = render(<Screen host={host({ ...none, where })} api={fakeApi([])} />)
-      expect(container.querySelector('[data-cover]')?.getAttribute('data-cover')).toBe(state)
-      expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
-      cleanup()
-    }
-  })
-
-  test('alone, the page draws its own header; hosted, the host does', () => {
-    render(<Screen host={host({ where: 'unhosted' })} api={fakeApi([])} />)
-    expect(screen.getByRole('button', { name: /View/ })).toBeDefined()
-    cleanup()
-    render(<Screen host={host()} api={fakeApi([])} />)
-    expect(screen.queryByRole('button', { name: /View/ })).toBeNull()
+  test('alone, it draws its own header and the cover says there is no host', () => {
+    draw({ host: { where: 'unhosted' } })
+    expect(screen.getByText('Monitor')).toBeTruthy()
   })
 })

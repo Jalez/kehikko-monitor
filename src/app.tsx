@@ -1,185 +1,148 @@
-import { X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { pickedParts, type HeaderItem, type PressValue } from 'kehikot-module-protocol'
-import { Cover, coverFor, useFocus, useServerStanding } from 'kehikot-module-protocol/client/react'
+import type { HeaderItem, PressValue } from 'kehikot-module-protocol'
+import { Cover, coverFor, useServerStanding } from 'kehikot-module-protocol/client/react'
 
 import { HeaderMenus } from '@/components/header-menus'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { headerItems, pressed, type Showing } from '@/header'
-import { inboxItems } from '@/inbox'
-import { api as realApi, type Api } from '@/wire/api'
+import { headerItems, pressed, type HeaderState } from '@/header'
+import { colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat } from '@/traffic/model'
 import { useKehikot, type Host } from '@/wire/use-kehikot'
+import { useTraffic, type Traffic } from '@/wire/use-traffic'
 
-import type { Edit, Note } from '../store.ts'
+import { Calls } from '@/view/calls'
+import { Connections } from '@/view/connections'
+import { Repeats } from '@/view/repeats'
+import { Summary } from '@/view/summary'
+import { Timeline } from '@/view/timeline'
 
 type Press = { item: string; value?: PressValue }
 
 /**
- * The page. It owns every bit of its state: the view the header switch is on,
- * and the notes as last read. The host draws the header from what is declared
- * here, and is told the whole list again whenever it changes.
+ * The page. It owns its state — the range, the pause, the caller shown, what was cleared — and
+ * reads the host's record of traffic every second while it is open and not paused.
  */
 export function App() {
-  const [showing, setShowing] = useState<Showing>('open')
+  const [range, setRange] = useState<Range>(5)
+  const [paused, setPaused] = useState(false)
+  const [caller, setCaller] = useState<Caller | null>(null)
+  const [clearedAt, setClearedAt] = useState(0)
+  const [filter, setFilter] = useState<Filter>({ by: null, text: '' })
+  const [order, setOrder] = useState<Caller[]>([])
+  const callers = useRef<Caller[]>([])
+
   /* One handler for a press from the host's menus and from this page's own copy of them. A sentence is "not taken, and why". */
   const press = useCallback(({ item, value }: Press) => {
-    const view = pressed(item, value)
-    if (view !== 'open' && view !== 'all') return view
-    setShowing(view)
+    const said = pressed(item, value, callers.current)
+    if (typeof said === 'string') return said
+    if ('range' in said) setRange(said.range)
+    else if ('paused' in said) setPaused(said.paused)
+    else if ('caller' in said) {
+      setCaller(said.caller)
+      setFilter((was) => ({ ...was, by: said.caller }))
+    } else setClearedAt(Date.now())
   }, [])
   const host = useKehikot({ onPress: press })
-  const items = useMemo(() => headerItems(showing), [showing])
-  /* Declared at mount and again whenever it changes; the client replays it on every greeting. */
+  const traffic = useTraffic(host.where === 'hosted' ? host.request : null, paused, clearedAt)
+
+  /* A colour follows its caller from the moment it first called, whatever the filter or the ranks. */
+  useEffect(() => {
+    setOrder((was) => {
+      const next = colourOrder(was, traffic.calls)
+      return next.length === was.length ? was : next
+    })
+  }, [traffic.calls])
+  const seen = useMemo(() => {
+    const out: Caller[] = [...order]
+    for (const call of traffic.calls) if (!out.includes(call.by)) out.push(call.by)
+    return out
+  }, [order, traffic.calls])
+  callers.current = seen
+
+  const state: HeaderState = { range, paused, caller, callers: seen }
+  const items = useMemo(() => headerItems(state), [range, paused, caller, seen]) // eslint-disable-line react-hooks/exhaustive-deps
   const { header } = host
   useEffect(() => header(items), [header, items])
-  return <Screen host={host} items={items} showing={showing} onPress={press} />
+
+  return (
+    <Screen
+      host={host}
+      traffic={traffic}
+      items={items}
+      state={state}
+      order={order}
+      filter={filter}
+      onFilter={setFilter}
+      onPress={press}
+      onShow={(repeat) => setFilter({ by: repeat.by, text: repeat.reason ? `${repeat.where} ${repeat.reason}` : repeat.where })}
+    />
+  )
 }
 
-/**
- * Everything drawn, from a plain `Host`, so a test draws it with a made-up
- * context (test/render.test.tsx).
- */
+/** Everything drawn, from plain values, so a test draws it with made-up traffic (test/render.test.tsx). */
 export function Screen({
   host,
-  api = realApi,
-  items = headerItems('open'),
-  showing = 'open',
+  traffic,
+  items,
+  state,
+  order,
+  filter,
+  onFilter = () => {},
   onPress = () => {},
+  onShow = () => {},
+  now: given,
 }: {
   host: Host
-  api?: Api
-  items?: HeaderItem[]
-  showing?: Showing
+  traffic: Traffic
+  items: HeaderItem[]
+  state: HeaderState
+  order: readonly Caller[]
+  filter: Filter
+  onFilter?: (filter: Filter) => void
   onPress?: (press: Press) => void
+  onShow?: (repeat: Repeat) => void
+  now?: number
 }) {
-  /* What this page's own server last did, learned by every `ask()`: it stopped, or restarted under this page. */
   const server = useServerStanding()
   const [again, setAgain] = useState(0)
-  /* The one screen for every not-ready moment: waiting for a host, no host, no project, a stopped server. */
-  const cover = coverFor({ ...host, server }, { project: true })
+  /* The one screen for every not-ready moment: waiting for a host, no host, a stopped server. No project is needed. */
+  const cover = coverFor({ ...host, server }, { host: true, project: false })
+  /* Paused, the picture stands still at the last read. */
+  const now = given ?? traffic.at ?? Date.now()
+  const found = useMemo(() => repeats(traffic.calls, now), [traffic.calls, now])
+  const rows = useMemo(() => summary(traffic.calls, now), [traffic.calls, now])
 
   return (
     <div className="flex h-screen min-w-0 flex-col text-sm">
-      {/* Hosted, the host draws the header items in the container's own header. Alone, the page does. */}
       {host.where === 'unhosted' ? (
         <header className="flex min-h-9 shrink-0 items-center gap-2 border-b px-2">
-          <span className="text-xs font-medium">Example</span>
+          <span className="text-xs font-medium">Monitor</span>
           <HeaderMenus items={items} onPress={onPress} />
         </header>
       ) : null}
-      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3">
+      <main key={again} className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
         {cover ? (
-          <Cover state={cover} name="Example" onRetry={() => setAgain((n) => n + 1)} />
+          <Cover state={cover} name="Monitor" onRetry={() => setAgain((n) => n + 1)} />
+        ) : traffic.problem && !traffic.calls.length ? (
+          <p className="text-muted-foreground rounded-md border p-3 text-xs" role="status">
+            {traffic.problem}
+          </p>
         ) : (
           <>
-            <Where host={host} />
-            <Notes key={`${host.projectPath}:${again}`} host={host} api={api} showing={showing} />
+            <p className="text-muted-foreground flex flex-wrap gap-x-2 text-xs" role="status" aria-live="polite">
+              <span>{state.paused ? 'Paused: the picture stands still. Turn Paused off to go on.' : 'Live: read every second, on this computer only.'}</span>
+              {traffic.gap ? <span>Some calls were made faster than Monitor read them and are not shown.</span> : null}
+              {traffic.problem ? <span>{traffic.problem}</span> : null}
+            </p>
+            <Timeline calls={traffic.calls} range={state.range} order={order} only={state.caller} now={now} />
+            <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
+              <Repeats repeats={found} onShow={onShow} />
+              <Summary rows={rows} order={order} budgets={traffic.budgets} />
+            </div>
+            <Calls calls={traffic.calls} order={order} filter={filter} onFilter={onFilter} callers={state.callers} />
+            <Connections processes={traffic.processes} />
           </>
         )}
       </main>
     </div>
-  )
-}
-
-/** Where the host says the person is: project, epic and the parts picked out. */
-function Where({ host }: { host: Host }) {
-  return (
-    <p className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-1 text-xs" data-testid="where">
-      <span className="truncate" data-testid="project">{host.project ?? 'No project'}</span>
-      <span aria-hidden>›</span>
-      <span className="truncate" data-testid="epic">{host.epic ?? 'no epic open'}</span>
-      {/* Said even when nothing is picked: "the whole epic" is an answer, and a blank would read as a host that did not say. */}
-      {host.epic ? (
-        <Badge variant="outline" data-testid="parts">
-          {host.picked.length ? host.picked.join(', ') : 'the whole epic'}
-        </Badge>
-      ) : null}
-    </p>
-  )
-}
-
-/** The notes of this project, narrowed to the epic and to the parts picked, with a line to add one. */
-function Notes({ host, api, showing }: { host: Host; api: Api; showing: Showing }) {
-  const projectPath = host.projectPath!
-  const [notes, setNotes] = useState<Note[] | null>(null)
-  const [said, setSaid] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
-  const focus = useFocus(host)
-
-  useEffect(() => {
-    let live = true
-    api
-      .read(projectPath)
-      .then((read) => live && setNotes(read))
-      .catch((error: unknown) => live && setSaid(error instanceof Error ? error.message : String(error)))
-    return () => {
-      live = false
-    }
-  }, [projectPath, api])
-
-  /* The Inbox gets every open note of this epic, whole, whenever the list changes. */
-  const { activity, epic } = host
-  useEffect(() => {
-    if (notes) activity(inboxItems(notes, epic))
-  }, [activity, notes, epic])
-
-  const edit = (one: Edit) =>
-    api
-      .edit(projectPath, one)
-      .then((next) => {
-        setNotes(next)
-        setSaid(null)
-        return true
-      })
-      .catch((error: unknown) => {
-        setSaid(error instanceof Error ? error.message : String(error))
-        return false
-      })
-
-  if (notes === null) return said ? <p className="text-destructive text-xs">{said}</p> : null
-
-  /* The epic's notes, then THE rule for parts: a note is anchored to the parts it was written under. */
-  const ofEpic = notes.filter((note) => note.epic === host.epic && (showing === 'all' || !note.done))
-  const { shown, empty } = focus.narrow(ofEpic, (note) => (note.parts.length ? note.parts.map((part) => ({ part })) : { whole: true }), { noun: 'note' })
-
-  return (
-    <section className="flex min-w-0 flex-col gap-2">
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          const parts = pickedParts(host.parts).map((part) => part.id)
-          void edit({ op: 'add', text: draft, epic: host.epic, parts }).then((done) => done && setDraft(''))
-        }}
-      >
-        <Input aria-label="A new note" placeholder="A note about this epic" value={draft} onChange={(event) => setDraft(event.target.value)} />
-        <Button type="submit" size="sm" disabled={!draft.trim()}>
-          Add
-        </Button>
-      </form>
-      {said ? <p className="text-destructive text-xs" data-testid="said">{said}</p> : null}
-      {empty ? <p className="text-muted-foreground text-xs">{empty}</p> : null}
-      {!shown.length && !empty ? <p className="text-muted-foreground text-xs">{showing === 'open' ? 'No open notes.' : 'No notes yet.'}</p> : null}
-      <ul className="flex flex-col gap-1">
-        {shown.map((note) => (
-          <li key={note.id} className="group flex min-w-0 items-center gap-2">
-            <input
-              type="checkbox"
-              aria-label={note.done ? `Reopen “${note.text}”` : `Finish “${note.text}”`}
-              checked={note.done}
-              onChange={(event) => void edit({ op: 'done', id: note.id, done: event.target.checked })}
-            />
-            {/* A note is the person's text: drawn as text, never as markup. */}
-            <span className={`min-w-0 flex-1 break-words ${note.done ? 'text-muted-foreground line-through' : ''}`}>{note.text}</span>
-            <Button variant="ghost" size="sm" className="size-6 p-0 opacity-60 group-hover:opacity-100" aria-label={`Remove “${note.text}”`} onClick={() => void edit({ op: 'remove', id: note.id })}>
-              <X className="size-3" />
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </section>
   )
 }

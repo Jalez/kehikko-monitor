@@ -115,3 +115,46 @@
     font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
   }
 }
+
+/*
+ * The timeline's series: one colour per caller, in a fixed order, never cycled (the dataviz
+ * reference palette's first seven slots, validated adjacent-pair for colour blindness in both
+ * modes). Past seven callers they fold into Other, in neutral grey. Free calls are the same hue,
+ * hatched. Light: three slots are under 3:1 on the surface, so every caller is also named in the
+ * legend and in the table beside the chart.
+ */
+:root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-other: #898781;
+  --grid: #e1e0d9;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-other: #898781;
+    --grid: #2c2c2a;
+  }
+}
+.dark {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-other: #898781;
+  --grid: #2c2c2a;
+}
