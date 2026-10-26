@@ -19,6 +19,8 @@ import { BUCKETS_MS, OTHER, buckets, callerLabel, callerOf, freeKey, isFree, typ
  *   in the caller's colour HATCHED.
  * - **Area**: the stack of Bars over the buckets of Lines, smoothed; free calls hatched.
  *
+ * Lines and area stop at the last whole bucket; bars draw the one still filling.
+ *
  * Drawn without animation: a new bucket moves the marks by one, nothing else redraws. The legend
  * names every caller drawn in every style; the table of callers below has the same numbers in text.
  */
@@ -95,7 +97,11 @@ export const Timeline = memo(function Timeline({ calls, range, order, only, now,
   const coloured = useMemo(() => (only === null ? order : order.filter((caller) => caller === only)), [order, only])
   const mine = useMemo(() => (only === null ? calls : calls.filter((call) => callerOf(call) === only)), [calls, only])
   const shown = useMemo(() => drawnCallers(style, narrow, coloured, mine, from), [style, narrow, coloured, mine, from])
-  const data = useMemo(() => buckets(mine, now, range, shown, bucketMs), [mine, now, range, shown, bucketMs])
+  /* Lines and area end at the last whole bucket: the one `now` is in has run only part of its width, and its line would dip or jump. */
+  const data = useMemo(() => {
+    const all = buckets(mine, now, range, shown, bucketMs)
+    return style === 'bars' ? all : all.slice(0, -1)
+  }, [mine, now, range, shown, bucketMs, style])
   const hasOther = useMemo(() => data.some((bucket) => (bucket[OTHER] ?? 0) + (bucket[freeKey(OTHER)] ?? 0) > 0), [data])
   const series = useMemo(() => [...shown.map((caller) => ({ caller, slot: order.indexOf(caller) })), ...(hasOther ? [{ caller: OTHER, slot: -1 }] : [])], [shown, order, hasOther])
   /* Which callers had free calls in the range: a dashed line is drawn only for those. */
@@ -198,7 +204,7 @@ export const Timeline = memo(function Timeline({ calls, range, order, only, now,
     )
 
   return (
-    <figure ref={ref} className="flex min-w-0 flex-col gap-2" aria-labelledby="timeline-title" data-style={style} data-bucket-ms={bucketMs}>
+    <figure ref={ref} className="flex min-w-0 flex-col gap-2" aria-labelledby="timeline-title" data-style={style} data-bucket-ms={bucketMs} data-points={data.length}>
       <figcaption className="flex flex-wrap items-baseline justify-between gap-x-3">
         <h2 id="timeline-title" className="text-sm font-medium">
           Calls per second

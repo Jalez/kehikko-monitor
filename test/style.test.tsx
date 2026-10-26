@@ -61,6 +61,18 @@ describe('the chart styles', () => {
     expect(bucketSaid('bars', 15_000)).toBe('each bar is 15 seconds')
   })
 
+  test('lines and area end at the last whole bucket; bars draw the one still filling', () => {
+    const points = (style: Style) => {
+      render(<Timeline calls={calls} range={5} order={order} only={null} now={NOW} style={style} />)
+      const n = Number(figure().getAttribute('data-points'))
+      cleanup()
+      return n
+    }
+    expect(points('lines')).toBe(59)
+    expect(points('area')).toBe(59)
+    expect(points('bars')).toBe(300)
+  })
+
   test('the caller filter holds in every style: only that caller is in the legend', () => {
     for (const style of ['lines', 'bars', 'area'] as const) {
       render(<Timeline calls={calls} range={5} order={order} only="kehikot.claude" now={NOW} style={style} />)
