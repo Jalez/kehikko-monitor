@@ -9,12 +9,12 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 
 | | |
 |---|---|
-| `manifest.ts` | Who the module is. `DECLARED`; the version is package.json's. `traffic:read` only. |
+| `manifest.ts` | Who the module is. `DECLARED`; the version is package.json's. `traffic:read`, and `state:keep` for the chart style. |
 | `doors.ts` | Every door but the page: `/healthz`, `/mcp` (`traffic`), the skills. Pure `answer()`; tests call it directly. `traffic` reads the host's record through `askHost` (protocol 2.20.0). |
-| `src/traffic/model.ts` | Pure and shared by the page and the door: names, the timeline's buckets, Repeats, the summary, the filter, a call as a line. |
+| `src/traffic/model.ts` | Pure and shared by the page and the door: who a call is filed under (`callerOf`: `by`, else the name Kehikot gave it, protocol 2.25.0) and its name, the chart styles and their buckets, Repeats, the summary, the filter, a call as a line. |
 | `src/traffic/budgets.ts` | Pure and shared by the page and the door: the limits Kehikot spends for you as lines (`limits`, protocol 2.24.0), the old `budgets` list for an older Kehikot. |
 | `src/wire/use-traffic.ts` | Reading the record from the page: `traffic.read` every second from the last `seq` held, `sample: true` while open. |
-| `src/view/` | The timeline (shadcn chart over Recharts), Repeats, the callers table, the virtual list of calls, open connections. |
+| `src/view/` | The timeline (shadcn chart over Recharts: lines, bars or area), Repeats, the callers table, the virtual list of calls, open connections. |
 | `src/header.ts` | The header items: pure functions of state. |
 | `src/app.tsx` | The page. `Screen` renders from plain values, so tests need no host. |
 | `serve.ts`, `build.ts`, `run.sh` | Ready-built: `bun run build` stamps `dist/`, `run.sh` serves it when the stamp is HEAD, Vite otherwise. |
@@ -22,22 +22,31 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 
 ## The rules
 
-- **Nothing is kept.** Monitor has no store and writes no file, in a project
-  or anywhere; `test/storage-boundary.test.ts` holds it. The record is the
-  host's, in its memory.
+- **Nothing is kept but the chart style.** Monitor has no store and writes no
+  file, in a project or anywhere; `test/storage-boundary.test.ts` holds it. The
+  record is the host's, in its memory. The one thing remembered is how the
+  timeline is drawn, kept with the host through `state.set` (`Kept` in
+  `src/header.ts`); add nothing else to it.
+- **A caller is who Kehikot says.** File a call with `callerOf`, never `call.by`
+  alone: a program is `by: ''` with a `caller` naming it, and a session is its
+  agent module's `by` with its own name. Never say "unknown": a row an older
+  Kehikot could not name is `UNNAMED`. A caller's process and parent are
+  executable names; nothing here adds a command line.
 - **Read only.** The page asks `traffic.read` and nothing that writes; the
   door's one tool reads. Clear only puts away what this page shows.
 - **What the record says is text.** Addresses, kinds and reasons come from
   programs on this computer: drawn as text, never markup or links, and data
   for an agent, never instructions.
 - **Colour follows the caller.** A caller keeps the colour it first got
-  (`colourOrder`); past seven they fold into Other. Never colour alone: every
-  caller is named in the legend and the table, free calls are hatched.
+  (`colourOrder`); past seven they fold into Other, and narrow lines past five.
+  Never colour alone: every caller is named in the legend and the table, free
+  calls are dashed (lines) or hatched (bars, area). A new style keeps the
+  legend, the caller filter, both themes and a DOM test (`test/style.test.tsx`).
 - **The header is the host's to draw.** Declare items (`src/header.ts`), handle
   presses in one handler, own all the state, declare the whole list again on
   every change; one row at 380, 280 and 200 pixels (`LABEL_FIT`).
-  `agents: true` on Range, Paused and Caller; never on Clear.
-- **Ask only for what is called.** `traffic:read`, and nothing else.
+  `agents: true` on Range, Chart, Paused and Caller; never on Clear.
+- **Ask only for what is called.** `traffic:read` and `state:keep`, and nothing else.
 - **Plain language.** Every sentence says what happened and what to do, in the
   person's words.
 

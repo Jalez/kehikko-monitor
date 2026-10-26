@@ -5,20 +5,82 @@ import { TRAFFIC_HOST_BY, type TrafficCall } from 'kehikot-module-protocol'
  * repeats. Pure, and shared by the page and the MCP door, so an agent is told what the person sees.
  */
 
-/** The ranges the timeline shows, in minutes, and how wide each bucket is. */
+/** The ranges the timeline shows, in minutes. */
 export const RANGES = [5, 15, 60] as const
 export type Range = (typeof RANGES)[number]
-export const BUCKET_MS: Record<Range, number> = { 5: 1000, 15: 5000, 60: 15_000 }
 
-/** A caller is who made or sent a call: the host (`kehikko`), a module id, or `''`. */
+/**
+ * How the timeline is drawn. `lines`: one line per caller, the default — who is busy, and when.
+ * `bars`: every caller stacked, a bar a bucket — the whole load. `area`: the same stack, smoothed.
+ */
+export const STYLES = ['lines', 'bars', 'area'] as const
+export type Style = (typeof STYLES)[number]
+export const STYLE_SAID: Record<Style, string> = { lines: 'Lines', bars: 'Bars', area: 'Area' }
+
+/**
+ * How wide a bucket is, by style and range. Bars show each second over five minutes; lines and
+ * area are smoothed into buckets a line can be read through: 5 s over 5 min, 15 s over 15, a minute
+ * over an hour — sixty points each.
+ */
+export const BUCKETS_MS: Record<Style, Record<Range, number>> = {
+  bars: { 5: 1000, 15: 5000, 60: 15_000 },
+  lines: { 5: 5000, 15: 15_000, 60: 60_000 },
+  area: { 5: 5000, 15: 15_000, 60: 60_000 },
+}
+/** The bars' buckets, as before there were styles. */
+export const BUCKET_MS: Record<Range, number> = BUCKETS_MS.bars
+
+/**
+ * A caller is who made or sent a call: the host (`kehikko`), a module id — an agent module's
+ * sessions are filed under it — or, for a request from anything else, the name Kehikot gave it
+ * (protocol 2.25.0: `~program:curl, from your terminal (zsh)`). `''` only from a Kehikot before
+ * 2.25.0 that could not tell.
+ */
 export type Caller = string
 
-/** The name a person knows a caller by: "Kehikot", "Kanban", "An unknown program". */
+/** Who a call is filed under. */
+export function callerOf(call: TrafficCall): Caller {
+  if (call.by) return call.by
+  if (call.caller) return `~${call.caller.kind}:${call.caller.name}`
+  return ''
+}
+
+/** What a Kehikot before 2.25.0 could not tell, said as what it is. */
+export const UNNAMED = 'A program this Kehikot did not name'
+
+/** The name a person knows a caller by: "Kehikot", "Kanban", "curl, from your terminal (zsh)". */
 export function callerName(by: Caller): string {
   if (by === TRAFFIC_HOST_BY) return 'Kehikot'
-  if (!by) return 'An unknown program'
+  if (!by) return UNNAMED
+  if (by.startsWith('~')) return by.slice(by.indexOf(':') + 1) || UNNAMED
   const last = by.replace(/^(kehikot|roadmap)\./, '').replace(/[-_.]+/g, ' ').trim()
   return last ? last[0]!.toUpperCase() + last.slice(1) : by
+}
+
+/** Who asked, as the row itself names it: a session by its place, else its caller. */
+export const whoSaid = (call: TrafficCall): string => call.caller?.name ?? callerName(callerOf(call))
+
+/** How many of an agent module's sessions are in the calls: one per process, or per place when no process was found. */
+export function sessionsOf(calls: readonly TrafficCall[], by: Caller): number {
+  const seen = new Set<string>()
+  for (const call of calls) if (call.by === by && call.caller?.kind === 'session') seen.add(call.caller.pid ? `p${call.caller.pid}` : `n${call.caller.name}`)
+  return seen.size
+}
+
+/** A caller's name with its sessions, when it has any: "Claude: 3 sessions". */
+export function callerLabel(by: Caller, calls: readonly TrafficCall[]): string {
+  const sessions = by && !by.startsWith('~') ? sessionsOf(calls, by) : 0
+  return sessions ? `${callerName(by)}: ${sessions} session${sessions === 1 ? '' : 's'}` : callerName(by)
+}
+
+/** How Kehikot told who it was, in a sentence's words. */
+export const HOW_SAID: Record<NonNullable<TrafficCall['caller']>['how'], string> = {
+  route: 'by the route it asked: a module’s server, with its pass',
+  origin: 'by the origin of the page that asked',
+  token: 'by the place token on its MCP call',
+  process: 'by the process holding the connection, and its parents',
+  address: 'by its address: it is not this computer',
+  closed: 'it could not: the program had closed its connection before Kehikot looked',
 }
 
 /** Whether a call cost nothing on the network: answered from a cache, a 304, or held back by a budget. */
@@ -97,8 +159,7 @@ export interface Bucket {
  * caller (`caller`, and `freeKey(caller)` for the free ones). Callers outside `shown` fold into
  * "Other". A bucket with no calls is all zeros, so the bars stand where the time is.
  */
-export function buckets(calls: readonly TrafficCall[], now: number, range: Range, shown: readonly Caller[]): Bucket[] {
-  const width = BUCKET_MS[range]
+export function buckets(calls: readonly TrafficCall[], now: number, range: Range, shown: readonly Caller[], width: number = BUCKET_MS[range]): Bucket[] {
   const end = Math.floor(now / width) * width
   const count = Math.round((range * 60_000) / width)
   const start = end - (count - 1) * width
@@ -117,7 +178,8 @@ export function buckets(calls: readonly TrafficCall[], now: number, range: Range
     if (call.side === 'seen') continue
     const i = Math.floor((call.at - start) / width)
     if (i < 0 || i >= count) continue
-    const caller = shown.includes(call.by) ? call.by : OTHER
+    const who = callerOf(call)
+    const caller = shown.includes(who) ? who : OTHER
     const key = isFree(call) ? freeKey(caller) : caller
     out[i]![key] = (out[i]![key] ?? 0) + perSecond
   }
@@ -138,7 +200,8 @@ export function colourOrder(before: readonly Caller[], calls: readonly TrafficCa
   const order = [...before]
   for (const call of calls) {
     if (order.length >= COLOURED) break
-    if (!order.includes(call.by)) order.push(call.by)
+    const who = callerOf(call)
+    if (!order.includes(who)) order.push(who)
   }
   return order
 }
@@ -175,7 +238,7 @@ export interface Repeat {
 export const REPEAT_MIN = 5
 export const REPEAT_WINDOW_MS = 2 * 60_000
 
-const keyOf = (call: TrafficCall) => [call.by, call.via, call.side, call.kind, call.host, call.path, call.reason ?? ''].join('\u0000')
+const keyOf = (call: TrafficCall) => [callerOf(call), call.via, call.side, call.kind, call.host, call.path, call.reason ?? ''].join('\u0000')
 
 const median = (values: number[]) => {
   if (!values.length) return 0
@@ -226,7 +289,7 @@ export function repeats(calls: readonly TrafficCall[], now: number, windowMs = R
     const every = median(gaps)
     const repeat = {
       key,
-      by: first.by,
+      by: callerOf(first),
       side: first.side,
       kind: first.kind,
       where: destination(first),
@@ -268,7 +331,8 @@ export function summary(calls: readonly TrafficCall[], now: number, windowMs = 5
   const by = new Map<Caller, CallerSummary>()
   for (const call of calls) {
     if (call.at < from) continue
-    const one = by.get(call.by) ?? { by: call.by, name: callerName(call.by), calls: 0, perMinute: 0, bytes: 0, free: 0, freeRate: 0, unlabelled: 0, seen: 0 }
+    const who = callerOf(call)
+    const one = by.get(who) ?? { by: who, name: callerName(who), calls: 0, perMinute: 0, bytes: 0, free: 0, freeRate: 0, unlabelled: 0, seen: 0 }
     if (call.side === 'seen') one.seen++
     else {
       one.calls++
@@ -276,11 +340,12 @@ export function summary(calls: readonly TrafficCall[], now: number, windowMs = 5
       if (unlabelled(call)) one.unlabelled++
     }
     one.bytes += (call.bytesIn ?? 0) + (call.bytesOut ?? 0)
-    by.set(call.by, one)
+    by.set(who, one)
   }
   const minutes = windowMs / 60_000
+  const recent = calls.filter((call) => call.at >= from)
   return [...by.values()]
-    .map((one) => ({ ...one, perMinute: Math.round((one.calls / minutes) * 10) / 10, freeRate: one.calls ? one.free / one.calls : 0 }))
+    .map((one) => ({ ...one, name: callerLabel(one.by, recent), perMinute: Math.round((one.calls / minutes) * 10) / 10, freeRate: one.calls ? one.free / one.calls : 0 }))
     .sort((a, b) => b.calls - a.calls || b.seen - a.seen)
 }
 
@@ -298,9 +363,9 @@ export interface Filter {
 export function filtered(calls: readonly TrafficCall[], filter: Filter): TrafficCall[] {
   const words = filter.text.trim().toLowerCase().split(/\s+/).filter(Boolean)
   return calls.filter((call) => {
-    if (filter.by !== null && call.by !== filter.by) return false
+    if (filter.by !== null && callerOf(call) !== filter.by) return false
     if (!words.length) return true
-    const hay = `${destination(call)} ${call.kind} ${call.reason ?? 'no reason given'} ${callerName(call.by)}`.toLowerCase()
+    const hay = `${destination(call)} ${call.kind} ${call.reason ?? 'no reason given'} ${callerName(callerOf(call))} ${call.caller?.name ?? ''}`.toLowerCase()
     return words.every((word) => hay.includes(word))
   })
 }
@@ -313,5 +378,5 @@ export function callLine(call: TrafficCall): string {
   const took = call.ms === null ? '' : ` in ${call.ms} ms`
   const size = call.bytesIn || call.bytesOut ? `, ${bytesSaid((call.bytesIn ?? 0) + (call.bytesOut ?? 0))}` : ''
   const why = call.reason ?? 'no reason given'
-  return `${when} ${callerName(call.by)} ${verb(call)} ${call.kind} ${destination(call)}${status}${free}${took}${size} — ${why}`
+  return `${when} ${whoSaid(call)} ${verb(call)} ${call.kind} ${destination(call)}${status}${free}${took}${size} — ${why}`
 }

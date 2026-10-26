@@ -4,8 +4,8 @@ import type { HeaderItem, PressValue } from 'kehikot-module-protocol'
 import { Cover, coverFor, useServerStanding } from 'kehikot-module-protocol/client/react'
 
 import { HeaderMenus } from '@/components/header-menus'
-import { headerItems, pressed, type HeaderState } from '@/header'
-import { colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat } from '@/traffic/model'
+import { headerItems, keptStyle, pressed, type HeaderState } from '@/header'
+import { callerOf, colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat, type Style } from '@/traffic/model'
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
 
@@ -35,6 +35,7 @@ export function App() {
     const said = pressed(item, value, callers.current)
     if (typeof said === 'string') return said
     if ('range' in said) setRange(said.range)
+    else if ('style' in said) setStyle(said.style)
     else if ('paused' in said) setPaused(said.paused)
     else if ('caller' in said) {
       setCaller(said.caller)
@@ -42,6 +43,13 @@ export function App() {
     } else setClearedAt(Date.now())
   }, [])
   const host = useKehikot({ onPress: press })
+  /* How the chart is drawn: kept with the host, so the choice is there on the next open; Lines until one is made. */
+  const [chosen, setStyle] = useState<Style | null>(null)
+  const style = chosen ?? keptStyle(host.kept)
+  const remember = host.remember
+  useEffect(() => {
+    if (chosen !== null) remember?.({ style: chosen })
+  }, [chosen, remember])
   const traffic = useTraffic(host.where === 'hosted' ? host.request : null, paused, clearedAt)
 
   /* A colour follows its caller from the moment it first called, whatever the filter or the ranks. */
@@ -53,13 +61,16 @@ export function App() {
   }, [traffic.calls])
   const seen = useMemo(() => {
     const out: Caller[] = [...order]
-    for (const call of traffic.calls) if (!out.includes(call.by)) out.push(call.by)
+    for (const call of traffic.calls) {
+      const who = callerOf(call)
+      if (!out.includes(who)) out.push(who)
+    }
     return out
   }, [order, traffic.calls])
   callers.current = seen
 
-  const state: HeaderState = { range, paused, caller, callers: seen }
-  const items = useMemo(() => headerItems(state), [range, paused, caller, seen]) // eslint-disable-line react-hooks/exhaustive-deps
+  const state: HeaderState = { range, style, paused, caller, callers: seen }
+  const items = useMemo(() => headerItems(state), [range, style, paused, caller, seen]) // eslint-disable-line react-hooks/exhaustive-deps
   const { header } = host
   useEffect(() => header(items), [header, items])
 
@@ -133,7 +144,7 @@ export function Screen({
               {traffic.gap ? <span>Some calls were made faster than Monitor read them and are not shown.</span> : null}
               {traffic.problem ? <span>{traffic.problem}</span> : null}
             </p>
-            <Timeline calls={traffic.calls} range={state.range} order={order} only={state.caller} now={now} />
+            <Timeline calls={traffic.calls} range={state.range} style={state.style} order={order} only={state.caller} now={now} />
             <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
               <Repeats repeats={found} onShow={onShow} />
               <Summary rows={rows} order={order} budgets={traffic.budgets} limits={traffic.limits} />

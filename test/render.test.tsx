@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 import { Screen } from '../src/app.tsx'
+import { Details } from '../src/view/calls.tsx'
 import { headerItems, type HeaderState } from '../src/header.ts'
 import type { Host } from '../src/wire/use-kehikot.ts'
 import type { Traffic } from '../src/wire/use-traffic.ts'
@@ -26,7 +27,7 @@ const traffic = (over: Partial<Traffic> = {}): Traffic => ({
   ...over,
 })
 
-const state: HeaderState = { range: 5, paused: false, caller: null, callers: ['kehikot.kanban', 'kehikko'] }
+const state: HeaderState = { range: 5, style: 'lines', paused: false, caller: null, callers: ['kehikot.kanban', 'kehikko'] }
 
 function draw(over: { host?: Partial<Host>; traffic?: Partial<Traffic>; state?: Partial<HeaderState> } = {}, onShow = () => {}) {
   const s = { ...state, ...over.state }
@@ -43,7 +44,7 @@ describe('the screen', () => {
     const legend = screen.getByRole('list', { name: 'Callers' })
     expect(legend.textContent).toContain('Kanban')
     expect(legend.textContent).toContain('Kehikot')
-    expect(legend.textContent).toContain('Hatched: free')
+    expect(legend.textContent).toContain('Dashed: free')
   })
 
   test('repeats first: the module polling the host, in a sentence, with a way to its calls', () => {
@@ -79,6 +80,22 @@ describe('the screen', () => {
   test('alone, it draws its own header and the cover says there is no host', () => {
     draw({ host: { where: 'unhosted' } })
     expect(screen.getByText('Monitor')).toBeTruthy()
+  })
+
+  test('an opened row says who asked as Kehikot named them, the process, and how Kehikot told', () => {
+    const curl = call({ at: NOW - 500, by: '', via: 'process', path: '/host/health', caller: { kind: 'program', name: 'curl, from your terminal (zsh)', how: 'process', process: 'curl', parent: 'zsh', pid: 902 } })
+    const session = call({ at: NOW - 400, by: 'kehikot.claude', via: 'process', path: '/mcp', caller: { kind: 'session', name: 'Claude session on Wide · methods', how: 'token', place: 'Wide · methods' } })
+    const one = render(<Details call={curl} />)
+    expect(one.container.textContent).toContain('curl, from your terminal (zsh)')
+    expect(one.container.textContent).toContain('curl (pid 902), under zsh')
+    expect(one.container.textContent).toContain('by the process holding the connection, and its parents')
+    expect(one.container.textContent).not.toContain('unknown')
+    cleanup()
+    const two = render(<Details call={session} />)
+    expect(two.container.textContent).toContain('Claude session on Wide · methods (kehikot.claude)')
+    expect(two.container.textContent).toContain('Filed underClaude')
+    expect(two.container.textContent).toContain('PlaceWide · methods')
+    expect(two.container.textContent).toContain('by the place token on its MCP call')
   })
 })
 

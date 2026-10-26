@@ -57,8 +57,10 @@ export const DECLARED: Manifest = manifestSchema.parse({
      * Only what is called:
      * - traffic:read — `traffic.read`, the host's record of traffic, from the page every second and
      *   from this module's server for the `traffic` tool.
+     * - state:keep — `state.set`, how the timeline is drawn (lines, bars or area), so it is the same
+     *   the next time Monitor is opened. Nothing else is kept.
      */
-    uses: ['traffic:read'],
+    uses: ['traffic:read', 'state:keep'],
     /* Framed on its own origin, like every module that serves its own doors; it keeps nothing in a project. */
     storage: true,
     prompt: false,
