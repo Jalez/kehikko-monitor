@@ -6,6 +6,7 @@
  *   bun run stub                       # then open the address it prints
  *   STUB_PROJECT=/path/to/a/project bun run stub
  *   STUB_THEME=dark bun run stub       # the page in the dark theme
+ *   STUB_BACKFILL_MS=300000 bun run stub   # with five minutes of made-up traffic already there
  *
  * It starts this module (`vite`, with `KEHIKOT_ORIGINS` naming the stub, so the
  * page lets the stub frame it and the MCP door asks the stub which folders are
@@ -101,7 +102,7 @@ const page = `<!doctype html>
   /* Made-up traffic, so the page has something to draw: a module polling the host every 2 s, the
      host's page asking now and then, two Claude sessions at the MCP door, curl from a terminal, and
      a release list read with a 304 once a minute. */
-  var started = Date.now(), rows = [], seq = 0, made = started - 1;
+  var started = Date.now(), rows = [], seq = 0, made = started - ${Math.max(0, Math.min(3_600_000, Number(process.env.STUB_BACKFILL_MS) || 0))} - 1;
   function row(at, more) { seq++; rows.push(Object.assign({ seq: seq, at: at, ms: 2, reason: null, kind: 'GET', host: '127.0.0.1:4180', path: '/', status: 200, ok: true, by: 'kehikko', via: 'page', side: 'in', reported: 'host' }, more)); }
   function traffic(params) {
     var now = Date.now();
