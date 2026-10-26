@@ -136,7 +136,7 @@ export function Screen({
             <Timeline calls={traffic.calls} range={state.range} order={order} only={state.caller} now={now} />
             <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
               <Repeats repeats={found} onShow={onShow} />
-              <Summary rows={rows} order={order} budgets={traffic.budgets} />
+              <Summary rows={rows} order={order} budgets={traffic.budgets} limits={traffic.limits} />
             </div>
             <Calls calls={traffic.calls} order={order} filter={filter} onFilter={onFilter} callers={state.callers} />
             <Connections processes={traffic.processes} />

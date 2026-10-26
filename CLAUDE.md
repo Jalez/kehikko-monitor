@@ -12,6 +12,7 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | `manifest.ts` | Who the module is. `DECLARED`; the version is package.json's. `traffic:read` only. |
 | `doors.ts` | Every door but the page: `/healthz`, `/mcp` (`traffic`), the skills. Pure `answer()`; tests call it directly. `traffic` reads the host's record through `askHost` (protocol 2.20.0). |
 | `src/traffic/model.ts` | Pure and shared by the page and the door: names, the timeline's buckets, Repeats, the summary, the filter, a call as a line. |
+| `src/traffic/budgets.ts` | Pure and shared by the page and the door: the limits Kehikot spends for you as lines (`limits`, protocol 2.24.0), the old `budgets` list for an older Kehikot. |
 | `src/wire/use-traffic.ts` | Reading the record from the page: `traffic.read` every second from the last `seq` held, `sample: true` while open. |
 | `src/view/` | The timeline (shadcn chart over Recharts), Repeats, the callers table, the virtual list of calls, open connections. |
 | `src/header.ts` | The header items: pure functions of state. |

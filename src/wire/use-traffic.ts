@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { trafficReadResult, type TrafficBudget, type TrafficCall, type TrafficProcesses } from 'kehikot-module-protocol'
+import { trafficReadResult, type TrafficBudget, type TrafficCall, type TrafficLimits, type TrafficProcesses } from 'kehikot-module-protocol'
 
 import { HELD, held } from '../traffic/model.ts'
 
@@ -17,6 +17,8 @@ export type Ask = (method: string, params?: Record<string, unknown>) => Promise<
 export interface Traffic {
   calls: TrafficCall[]
   budgets: TrafficBudget[]
+  /** Each forge's budgets, separately: null from a Kehikot before protocol 2.24.0, which says only `budgets`. */
+  limits: TrafficLimits | null
   processes: TrafficProcesses | null
   /** A sentence when the host would not answer, or could not be asked. */
   problem: string | null
@@ -40,7 +42,7 @@ export async function readOnce(
   /* A host that restarted numbers from 1 again: read it from the start, and keep what was held. */
   const fresh = restarted ? read.data.calls : read.data.calls.filter((call) => call.seq > cursor.since)
   return {
-    traffic: { calls: held(before, fresh, now), budgets: read.data.budgets, processes: read.data.processes, problem: null, gap: read.data.gap },
+    traffic: { calls: held(before, fresh, now), budgets: read.data.budgets, limits: read.data.limits ?? null, processes: read.data.processes, problem: null, gap: read.data.gap },
     cursor: { since: read.data.newest, started: read.data.started },
   }
 }
@@ -54,7 +56,7 @@ export function problemOf(error: unknown): string {
 }
 
 export function useTraffic(ask: Ask | null, paused: boolean, clearedAt: number, now: () => number = Date.now): Traffic {
-  const [traffic, setTraffic] = useState<Traffic>({ calls: [], budgets: [], processes: null, problem: null, gap: false, at: null })
+  const [traffic, setTraffic] = useState<Traffic>({ calls: [], budgets: [], limits: null, processes: null, problem: null, gap: false, at: null })
   const cursor = useRef<{ since: number; started: number | null }>({ since: 0, started: null })
   const calls = useRef<TrafficCall[]>([])
 

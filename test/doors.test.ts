@@ -93,4 +93,26 @@ describe('what traffic says', () => {
     expect(trafficSaid(read, { caller: 'Nobody' }, NOW)).toContain('No call by "Nobody"')
     expect(callerNamed('kanban', ['kehikot.kanban', 'kehikko'])).toBe('kehikot.kanban')
   })
+
+  test('the limits: the account, Kehikot’s share and a pause, as the page says them; the old list from an older Kehikot', () => {
+    const account = {
+      login: 'Jalez',
+      core: { limit: 5000, used: 188, remaining: 4812, resets: null, share: { limit: 1000, used: 312 }, floor: 500 },
+      graphql: null,
+      paused: true,
+      why: "Kehikot's share of your GitHub limit is used until 11:00",
+      until: null,
+      at: NOW,
+    }
+    const anonymous = { name: 'GitHub without an account', used: 0, limit: 30, left: 30, resets: null, note: '' }
+    const said = trafficSaid({ ...read, limits: { github: { account, anonymous }, gitlab: { account: { ...account, login: 'me', core: { ...account.core, share: null, floor: null }, paused: false, why: '' } } } }, { view: 'summary' }, NOW)
+    expect(said).toContain('Limits Kehikot spends for you:')
+    expect(said).toContain('- GitHub as Jalez: 4,812 of 5,000 left this hour.')
+    expect(said).toContain("- Kehikot's share: 312 of 1,000 used.")
+    expect(said).toContain("- Paused: Kehikot's share of your GitHub limit is used until 11:00.")
+    expect(said).toContain('- GitLab as me: 4,812 of 5,000 left this hour.')
+    expect(said).not.toContain('Without an account')
+    const old = trafficSaid({ ...read, budgets: [{ ...anonymous, name: 'GitHub API without an account', used: 3, left: 27 }] }, { view: 'summary' }, NOW)
+    expect(old).toContain('- GitHub API without an account: 3 used, 27 left of 30 an hour.')
+  })
 })
