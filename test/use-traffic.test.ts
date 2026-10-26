@@ -26,6 +26,14 @@ describe('reading the record', () => {
     expect(read.traffic.calls).toEqual([...before, fresh])
   })
 
+  test('each forge’s limits are kept, and an older Kehikot without them says null', async () => {
+    const limits = { github: { account: { login: 'someone', core: { limit: 5000, used: 0, remaining: 5000, resets: null } }, anonymous: null } }
+    const read = await readOnce(async () => ({ ...answer([]), limits }), { since: 0, started: null }, [], 0)
+    expect(read.traffic.limits?.github?.account?.login).toBe('someone')
+    expect(read.traffic.limits?.github?.account?.core?.share).toBeNull()
+    expect((await readOnce(async () => answer([]), { since: 0, started: null }, [], 0)).traffic.limits).toBeNull()
+  })
+
   test('an answer of another shape is a sentence; a refusal is said in the person’s words', async () => {
     await expect(readOnce(async () => ({ nope: true }), { since: 0, started: null }, [], 0)).rejects.toThrow('cannot read')
     expect(problemOf(new Error('This host speaks 25 methods and that is not one of them.'))).toContain('Update Kehikot')

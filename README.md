@@ -11,7 +11,7 @@ again and again, so redundant polling stands out.
   minutes, in a sentence: "Kanban asks Kehikot /host/call (tracker.get) every
   2 s — 30 times, getting the same answer each time".
 - **Callers.** Each caller's calls a minute, bytes, share of free calls and
-  calls that came with no reason, and how much of the GitHub budget is used.
+  calls that came with no reason, and the GitHub limits: your account's, Kehikot's share of it, and any pause.
 - **Every call.** Newest first, filtered by caller and by words; a row opens
   to show who, why, where, the answer and whether it was free.
 - **Connections nobody reported.** What Kehikot sees open on its own processes

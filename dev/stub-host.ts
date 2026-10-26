@@ -112,7 +112,12 @@ const page = `<!doctype html>
     if (rows.length > 5000) rows = rows.slice(-5000);
     var since = params.since || 0;
     return { calls: rows.filter(function (r) { return r.seq > since; }), newest: seq, oldest: rows.length ? rows[0].seq : 0, gap: false, kept: 5000, started: started,
-      budgets: [{ name: 'GitHub API without an account', used: 2, limit: 30, left: 28, resets: null, note: 'Made up by the stub host.' }], processes: null };
+      budgets: [{ name: 'GitHub without an account', used: 2, limit: 30, left: 28, resets: null, note: 'Made up by the stub host.' }], processes: null,
+      limits: { github: {
+        account: { login: 'someone', paused: false, why: '', until: null, at: now,
+          core: { limit: 5000, used: 188, remaining: 4812, resets: now + 30 * 60000, share: { limit: 1000, used: 312 }, floor: 500 },
+          graphql: { limit: 5000, used: 40, remaining: 4960, resets: now + 45 * 60000, share: { limit: 1000, used: 25 }, floor: 500 } },
+        anonymous: { name: 'GitHub without an account', used: 2, limit: 30, left: 28, resets: null, note: 'Made up by the stub host.' } } } };
   }
   frame.addEventListener('load', function () {
     send({ type: '${MESSAGE.HELLO}', protocol: ${PROTOCOL}, session: 'stub', context: context(), state: kept,

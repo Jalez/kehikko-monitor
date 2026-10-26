@@ -1,4 +1,7 @@
-import type { TrafficBudget } from 'kehikot-module-protocol'
+import { CirclePause } from 'lucide-react'
+import type { TrafficBudget, TrafficLimits } from 'kehikot-module-protocol'
+
+import { budgetLines } from '../traffic/budgets.ts'
 
 import { bytesSaid, type Caller, type CallerSummary } from '../traffic/model.ts'
 import { seriesColour } from './timeline.tsx'
@@ -8,7 +11,18 @@ import { seriesColour } from './timeline.tsx'
  * came with no reason — the table beside the chart, so every number in it is readable without
  * colour — and the allowances Kehikot spends for you.
  */
-export function Summary({ rows, order, budgets }: { rows: readonly CallerSummary[]; order: readonly Caller[]; budgets: readonly TrafficBudget[] }) {
+export function Summary({
+  rows,
+  order,
+  budgets,
+  limits = null,
+}: {
+  rows: readonly CallerSummary[]
+  order: readonly Caller[]
+  budgets: readonly TrafficBudget[]
+  limits?: TrafficLimits | null
+}) {
+  const lines = budgetLines(limits, budgets)
   return (
     <section aria-labelledby="summary-title" className="flex min-w-0 flex-col gap-2">
       <h2 id="summary-title" className="text-sm font-medium">
@@ -51,20 +65,30 @@ export function Summary({ rows, order, budgets }: { rows: readonly CallerSummary
           </table>
         </div>
       )}
-      {budgets.map((budget) => (
-        <div key={budget.name} className="flex flex-col gap-1 text-xs">
-          <div className="flex items-baseline justify-between gap-2">
-            <span>{budget.name}</span>
-            <span className="tabular-nums">
-              {budget.used} used, {budget.left} left of {budget.limit} an hour
-            </span>
-          </div>
-          <div className="bg-muted h-1.5 overflow-hidden rounded-full" role="meter" aria-valuemin={0} aria-valuemax={budget.limit} aria-valuenow={budget.used} aria-label={`${budget.name}: ${budget.used} of ${budget.limit} used`}>
-            <div className="h-full rounded-full" style={{ width: `${budget.limit ? Math.min(100, (budget.used / budget.limit) * 100) : 0}%`, background: 'var(--series-1)' }} />
-          </div>
-          {budget.note ? <p className="text-muted-foreground">{budget.note}</p> : null}
-        </div>
-      ))}
+      {lines.length ? (
+        <ul aria-label="Limits Kehikot spends for you" className="flex flex-col gap-1.5 text-xs">
+          {lines.map((line) => (
+            <li key={line.key} className="flex min-w-0 flex-col gap-1">
+              <span className={line.paused ? 'flex items-start gap-1.5 font-medium' : 'break-words'}>
+                {line.paused ? <CirclePause className="mt-px size-3.5 shrink-0" aria-hidden /> : null}
+                <span className="min-w-0 break-words">{line.text}</span>
+              </span>
+              {line.meter ? (
+                <div
+                  className="bg-muted h-1.5 overflow-hidden rounded-full"
+                  role="meter"
+                  aria-valuemin={0}
+                  aria-valuemax={line.meter.limit}
+                  aria-valuenow={line.meter.used}
+                  aria-label={line.meter.label}
+                >
+                  <div className="h-full rounded-full" style={{ width: `${line.meter.limit ? Math.min(100, (line.meter.used / line.meter.limit) * 100) : 0}%`, background: 'var(--series-1)' }} />
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   )
 }
