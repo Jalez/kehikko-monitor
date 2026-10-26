@@ -5,6 +5,7 @@
  *
  *   bun run stub                       # then open the address it prints
  *   STUB_PROJECT=/path/to/a/project bun run stub
+ *   STUB_THEME=dark bun run stub       # the page in the dark theme
  *
  * It starts this module (`vite`, with `KEHIKOT_ORIGINS` naming the stub, so the
  * page lets the stub frame it and the MCP door asks the stub which folders are
@@ -64,7 +65,7 @@ const page = `<!doctype html>
   function say(line) { log.textContent = line + '\\n' + log.textContent; }
   function context() {
     return { epic: 'try-the-module', project: ${JSON.stringify(PROJECT.split('/').pop())}, projectPath: ${JSON.stringify(PROJECT)},
-      theme: 'light', parts: parts, selection: [] };
+      theme: ${JSON.stringify(process.env.STUB_THEME === 'dark' ? 'dark' : 'light')}, parts: parts, selection: [] };
   }
   function send(message) { frame.contentWindow.postMessage(message, '${MODULE}'); }
   function tell() { send(Object.assign({ type: '${MESSAGE.CONTEXT}', protocol: ${PROTOCOL} }, context())); }
@@ -98,7 +99,8 @@ const page = `<!doctype html>
     });
   }
   /* Made-up traffic, so the page has something to draw: a module polling the host every 2 s, the
-     host's page asking now and then, and a release list read with a 304 once a minute. */
+     host's page asking now and then, two Claude sessions at the MCP door, curl from a terminal, and
+     a release list read with a 304 once a minute. */
   var started = Date.now(), rows = [], seq = 0, made = started - 1;
   function row(at, more) { seq++; rows.push(Object.assign({ seq: seq, at: at, ms: 2, reason: null, kind: 'GET', host: '127.0.0.1:4180', path: '/', status: 200, ok: true, by: 'kehikko', via: 'page', side: 'in', reported: 'host' }, more)); }
   function traffic(params) {
@@ -106,6 +108,9 @@ const page = `<!doctype html>
     for (var t = Math.floor(made / 1000) * 1000 + 1000; t <= now; t += 1000) {
       if ((t / 1000) % 2 === 0) row(t, { by: 'kehikot.kanban', kind: 'POST', path: '/host/call', reason: 'tracker.get', bytesOut: 512 });
       if ((t / 1000) % 7 === 0) row(t + 120, { path: '/host/quiet?project=…', reason: 'the page asks whether modules are quiet' });
+      if ((t / 1000) % 3 === 0) row(t + 200, { by: 'kehikot.claude', via: 'process', kind: 'POST', path: '/mcp', reason: 'an agent asks Kehikot', caller: { kind: 'session', name: 'Claude session on Wide · methods', how: 'token', place: 'Wide · methods', process: 'claude', parent: 'bun', pid: 4242 } });
+      if ((t / 1000) % 5 === 0) row(t + 250, { by: 'kehikot.claude', via: 'process', kind: 'POST', path: '/mcp', reason: 'an agent asks Kehikot', caller: { kind: 'session', name: 'Claude session on Wide · results', how: 'token', place: 'Wide · results', process: 'claude', parent: 'bun', pid: 4243 } });
+      if ((t / 1000) % 11 === 0) row(t + 400, { by: '', via: 'process', path: '/host/health', reason: 'is Kehikot up', caller: { kind: 'program', name: 'curl, from your terminal (zsh)', how: 'process', process: 'curl', parent: 'zsh', pid: 9000 + (t / 1000) % 100 } });
       if ((t / 1000) % 60 === 0) row(t + 300, { side: 'out', via: 'server', host: 'api.github.com', path: '/repos/owner/repo/releases', status: 304, cache: 'not-modified', reason: 'GitHub releases: owner/repo', reported: 'host' });
     }
     made = now;

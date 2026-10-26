@@ -1,13 +1,13 @@
 import { LIMITS, headerItemsSchema, type HeaderItem } from 'kehikot-module-protocol'
 
-import { RANGES, callerName, type Caller, type Range } from './traffic/model.ts'
+import { RANGES, STYLES, STYLE_SAID, callerName, type Caller, type Range, type Style } from './traffic/model.ts'
 
 /**
- * What Monitor puts in its container's header: the range of the timeline, pause, which caller to
- * show, and Clear. The host draws them; this page owns the state and declares the whole list again
+ * What Monitor puts in its container's header: the range of the timeline, how it is drawn (Chart:
+ * lines, bars or area), pause, which caller to show, and Clear. The host draws them; this page owns the state and declares the whole list again
  * whenever it changes.
  *
- * `agents: true` only on what loses nothing: the range, the pause and the caller. Clear puts away
+ * `agents: true` only on what loses nothing: the range, the chart, the pause and the caller. Clear puts away
  * what the page shows, so it is the person's.
  *
  * Labels are text the host draws as text: short words (`LABEL_FIT`), no markup, no links.
@@ -24,6 +24,8 @@ export const EVERY = 'all'
 
 export interface HeaderState {
   range: Range
+  /** How the timeline is drawn; kept with the host (`state.set`), so it is the same next time. */
+  style: Style
   paused: boolean
   /** One caller, or every caller with null. */
   caller: Caller | null
@@ -31,9 +33,9 @@ export interface HeaderState {
   callers: readonly Caller[]
 }
 
-/** A header option id for a caller: its id (`unknown` for a caller nobody could name). */
+/** A header option id for a caller: its id, or what Kehikot named it (`unnamed` for a caller an older Kehikot could not). */
 export function callerOption(caller: Caller): string {
-  if (caller === '') return 'unknown'
+  if (caller === '') return 'unnamed'
   /* A module id is at most 64 characters, inside the protocol's bound on a header id. */
   return caller.slice(0, LIMITS.HEADER_ID)
 }
@@ -52,6 +54,14 @@ export function headerItems(state: HeaderState): HeaderItem[] {
       options: RANGES.map((minutes) => ({ id: `m${minutes}`, label: `Last ${minutes} minutes` })),
       value: `m${state.range}`,
     },
+    {
+      kind: 'switch',
+      id: 'style',
+      label: 'Chart',
+      agents: true,
+      options: STYLES.map((style) => ({ id: style, label: STYLE_SAID[style] })),
+      value: state.style,
+    },
     { kind: 'toggle', id: 'pause', label: 'Paused', agents: true, checked: state.paused },
     {
       kind: 'switch',
@@ -65,7 +75,18 @@ export function headerItems(state: HeaderState): HeaderItem[] {
   ])
 }
 
-export type Pressed = { range: Range } | { paused: boolean } | { caller: Caller | null } | { clear: true }
+/** What Monitor keeps with the host (`state.set`): only how the chart is drawn. */
+export interface Kept {
+  style: Style
+}
+
+/** The chart style a kept value says, or Lines: anything else kept (an older Monitor's, or nothing) is ignored. */
+export function keptStyle(kept: unknown): Style {
+  const style = kept && typeof kept === 'object' ? (kept as { style?: unknown }).style : undefined
+  return (STYLES as readonly unknown[]).includes(style) ? (style as Style) : 'lines'
+}
+
+export type Pressed = { range: Range } | { style: Style } | { paused: boolean } | { caller: Caller | null } | { clear: true }
 
 /** What a press asks for, or a sentence saying why it was not taken. */
 export function pressed(item: string, value: unknown, callers: readonly Caller[]): Pressed | string {
@@ -73,6 +94,7 @@ export function pressed(item: string, value: unknown, callers: readonly Caller[]
     const minutes = typeof value === 'string' ? Number(value.replace(/^m/, '')) : NaN
     return (RANGES as readonly number[]).includes(minutes) ? { range: minutes as Range } : `"${String(value).slice(0, 40)}" is not a range Monitor shows.`
   }
+  if (item === 'style') return (STYLES as readonly unknown[]).includes(value) ? { style: value as Style } : `"${String(value).slice(0, 40)}" is not a way Monitor draws its chart: lines, bars or area.`
   if (item === 'pause') return typeof value === 'boolean' ? { paused: value } : 'Pause is on or off.'
   if (item === 'caller') {
     if (value === EVERY) return { caller: null }

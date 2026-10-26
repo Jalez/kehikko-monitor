@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { TRAFFIC_REDACTED } from 'kehikot-module-protocol'
 
-import { BUCKET_MS, COLOURED, HELD, OTHER, buckets, callLine, callerName, colourOrder, filtered, freeKey, held, repeats, spoken, summary } from '../src/traffic/model.ts'
+import { BUCKETS_MS, BUCKET_MS, COLOURED, HELD, OTHER, UNNAMED, buckets, callLine, callerLabel, callerName, callerOf, colourOrder, filtered, freeKey, held, repeats, sessionsOf, spoken, summary, whoSaid } from '../src/traffic/model.ts'
 import { call, polling } from './fixtures.ts'
 
 const NOW = 1_000_000_000
@@ -12,7 +12,30 @@ describe('names and words', () => {
     expect(callerName('kehikko')).toBe('Kehikot')
     expect(callerName('kehikot.kanban')).toBe('Kanban')
     expect(callerName('kehikot.reading-list')).toBe('Reading list')
-    expect(callerName('')).toBe('An unknown program')
+    expect(callerName('')).toBe(UNNAMED)
+    expect(UNNAMED.toLowerCase()).not.toContain('unknown')
+  })
+  test('every caller Kehikot names (2.25.0): sessions under their agent module, programs by their own name', () => {
+    const session = (pid: number, place: string) =>
+      call({ by: 'kehikot.claude', via: 'process', path: '/mcp', caller: { kind: 'session', name: `Claude session on ${place}`, how: 'token', place, pid } })
+    const curl = call({ by: '', via: 'process', caller: { kind: 'program', name: 'curl, from your terminal (zsh)', how: 'process', process: 'curl', parent: 'zsh' } })
+    const remote = call({ by: '', caller: { kind: 'remote', name: 'Another computer (192.168.1.20)', how: 'address' } })
+    const gone = call({ by: '', caller: { kind: 'gone', name: 'A program that closed before it could be named', how: 'closed' } })
+    expect(callerOf(curl)).toBe('~program:curl, from your terminal (zsh)')
+    expect(callerName(callerOf(curl))).toBe('curl, from your terminal (zsh)')
+    expect(callerName(callerOf(remote))).toBe('Another computer (192.168.1.20)')
+    expect(callerName(callerOf(gone))).toBe('A program that closed before it could be named')
+    const calls = [session(1, 'Wide · methods'), session(1, 'Wide · methods'), session(2, 'Wide · results'), session(3, 'Tall · methods'), call({ by: 'kehikot.claude', via: 'server' })]
+    expect(callerOf(calls[0]!)).toBe('kehikot.claude')
+    expect(sessionsOf(calls, 'kehikot.claude')).toBe(3)
+    expect(callerLabel('kehikot.claude', calls)).toBe('Claude: 3 sessions')
+    expect(callerLabel('kehikot.claude', calls.slice(0, 1))).toBe('Claude: 1 session')
+    expect(callerLabel('kehikot.kanban', calls)).toBe('Kanban')
+    expect(whoSaid(calls[2]!)).toBe('Claude session on Wide · results')
+    expect(callLine(curl)).toContain('curl, from your terminal (zsh) asks')
+    expect(summary([...calls, curl], 1).map((row) => row.name)).toEqual(['Claude: 3 sessions', 'curl, from your terminal (zsh)'])
+    expect(filtered([...calls, curl], { by: callerOf(curl), text: '' })).toEqual([curl])
+    expect(filtered([...calls, curl], { by: null, text: 'results' })).toEqual([calls[2]!])
   })
   test('times and sizes', () => {
     expect(spoken(400)).toBe('under a second')
@@ -47,6 +70,14 @@ describe('the timeline', () => {
     expect(last[freeKey('kehikot.kanban')]).toBe(1)
     expect(last.kehikko).toBe(1)
     expect(data.reduce((sum, bucket) => sum + (bucket['kehikot.kanban'] ?? 0), 0)).toBe(1)
+  })
+  test('lines and area are smoothed into buckets a line reads through: 5 s, 15 s, a minute — sixty points', () => {
+    expect(BUCKETS_MS.lines).toEqual({ 5: 5000, 15: 15_000, 60: 60_000 })
+    expect(BUCKETS_MS.area).toEqual(BUCKETS_MS.lines)
+    expect(BUCKETS_MS.bars).toEqual({ 5: 1000, 15: 5000, 60: 15_000 })
+    for (const range of [5, 15, 60] as const) expect(buckets([], NOW, range, [], BUCKETS_MS.lines[range])).toHaveLength(60)
+    const data = buckets([call({ at: NOW + 100 }), call({ at: NOW + 200 })], NOW + 1000, 5, ['kehikot.kanban'], BUCKETS_MS.lines[5])
+    expect(data[data.length - 1]!['kehikot.kanban']).toBeCloseTo(2 / 5)
   })
   test('a wider range averages per second; callers outside the colours fold into Other', () => {
     const data = buckets([call({ at: NOW - 100 }), call({ at: NOW - 200, by: 'kehikot.paper' })], NOW, 60, ['kehikot.kanban'])

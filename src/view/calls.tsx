@@ -7,7 +7,7 @@ import type { TrafficCall } from 'kehikot-module-protocol'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-import { bytesSaid, callerName, destination, filtered, verb, type Caller, type Filter } from '../traffic/model.ts'
+import { HOW_SAID, bytesSaid, callerName, callerOf, destination, filtered, verb, whoSaid, type Caller, type Filter } from '../traffic/model.ts'
 import { seriesColour } from './timeline.tsx'
 
 /**
@@ -24,10 +24,23 @@ const SIDE: Record<TrafficCall['side'], string> = { out: 'made', in: 'received b
 const REPORTED: Record<TrafficCall['reported'], string> = { host: 'Kehikot recorded it', module: 'the module noted it', sampled: 'Kehikot saw the connection; nobody reported it' }
 const CACHE: Record<string, string> = { hit: 'answered from a cache: nothing was sent', 'not-modified': '304 Not Modified: free', refused: 'held back by a budget: nothing was sent' }
 
-function Details({ call }: { call: TrafficCall }) {
+/** "curl, under zsh", "claude (pid 4242), under bun": a process by its executable's name, never its arguments. */
+export function processSaid(caller: NonNullable<TrafficCall['caller']>): string | null {
+  if (!caller.process) return null
+  return `${caller.process}${caller.pid ? ` (pid ${caller.pid})` : ''}${caller.parent ? `, under ${caller.parent}` : ''}`
+}
+
+export function Details({ call }: { call: TrafficCall }) {
+  const who = callerOf(call)
+  const caller = call.caller
+  const process = caller ? processSaid(caller) : null
   const rows: [string, string][] = [
     ['When', new Date(call.at).toLocaleString()],
-    ['Who', `${callerName(call.by)}${call.by ? ` (${call.by})` : ''}, its ${call.via}`],
+    ['Who', `${whoSaid(call)}${call.by ? ` (${call.by})` : ''}, its ${call.via}`],
+    ...(caller && caller.name !== callerName(who) ? ([['Filed under', callerName(who)]] as [string, string][]) : []),
+    ...(process ? ([['Process', process]] as [string, string][]) : []),
+    ...(caller?.place ? ([['Place', caller.place]] as [string, string][]) : []),
+    ...(caller ? ([['Told', `Kehikot told who it was ${HOW_SAID[caller.how]}`]] as [string, string][]) : []),
     ['Which way', SIDE[call.side]],
     ['Why', call.reason ?? 'No reason given'],
     ['What', call.kind],
@@ -134,9 +147,11 @@ export function Calls({
                   >
                     <ChevronRight className={cn('size-3 shrink-0 transition-transform', expanded && 'rotate-90')} aria-hidden />
                     <span className="text-muted-foreground shrink-0 tabular-nums">{time(call.at)}</span>
-                    <span className="flex w-20 shrink-0 items-center gap-1 truncate @md:w-24">
-                      <span className="size-2 shrink-0 rounded-[2px]" style={{ background: seriesColour(order.indexOf(call.by)) }} aria-hidden />
-                      <span className="truncate">{callerName(call.by)}</span>
+                    <span className="flex w-24 shrink-0 items-center gap-1 truncate @md:w-40">
+                      <span className="size-2 shrink-0 rounded-[2px]" style={{ background: seriesColour(order.indexOf(callerOf(call))) }} aria-hidden />
+                      <span className="truncate" title={whoSaid(call)}>
+                        {whoSaid(call)}
+                      </span>
                     </span>
                     <span className="sr-only">{verb(call)}</span>
                     <span className="hidden w-24 shrink-0 truncate font-mono @md:inline" title={call.kind}>

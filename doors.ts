@@ -4,7 +4,7 @@ import { askHost, establishBuild, mintTicket, type AskHostOptions, type Reply } 
 import { DECLARED, ID, VERSION } from './manifest.ts'
 import { budgetLines } from './src/traffic/budgets.ts'
 import { isSkillPath, skillAt, skillDeclarations, serveFrom } from './skills.ts'
-import { REPEAT_MIN, REPEAT_WINDOW_MS, bytesSaid, callLine, callerName, filtered, repeats, spoken, summary, type Caller } from './src/traffic/model.ts'
+import { REPEAT_MIN, REPEAT_WINDOW_MS, bytesSaid, callLine, callerName, callerOf, filtered, repeats, spoken, summary, type Caller } from './src/traffic/model.ts'
 
 /**
  * Every door but the page, as one function: `answer` takes a request and returns a status and a
@@ -79,7 +79,13 @@ export function callerNamed(named: string, seen: readonly Caller[]): Caller | nu
   const want = named.trim().toLowerCase()
   if (!want) return null
   if ((want === 'unknown' || want === callerName('').toLowerCase()) && seen.includes('')) return ''
-  return seen.find((one) => one.toLowerCase() === want) ?? seen.find((one) => callerName(one).toLowerCase() === want) ?? null
+  /* A program by its name, or the start of it: "curl" finds "curl, from your terminal (zsh)". */
+  return (
+    seen.find((one) => one.toLowerCase() === want) ??
+    seen.find((one) => callerName(one).toLowerCase() === want) ??
+    seen.find((one) => one.startsWith('~') && callerName(one).toLowerCase().startsWith(want)) ??
+    null
+  )
 }
 
 /** The answer to `traffic`, as lines, from one read of the record. Pure, so a test reads it without a host. */
@@ -88,15 +94,15 @@ export function trafficSaid(read: TrafficReadResult, args: Record<string, unknow
   const minutes = typeof args.minutes === 'number' && Number.isInteger(args.minutes) ? Math.min(60, Math.max(1, args.minutes)) : null
   const limit = typeof args.limit === 'number' && Number.isInteger(args.limit) ? Math.min(200, Math.max(1, args.limit)) : 40
   const text = typeof args.text === 'string' ? args.text.slice(0, 200) : ''
-  const seen = [...new Set(read.calls.map((call) => call.by))]
+  const seen = [...new Set(read.calls.map(callerOf))]
   let calls = read.calls
   if (typeof args.caller === 'string' && args.caller.trim()) {
     const caller = callerNamed(args.caller, seen)
     if (caller === null) {
-      const listed = seen.map((one) => `${callerName(one)} (${one || 'unknown'})`).join(', ') || 'none yet'
+      const listed = seen.map((one) => (one && !one.startsWith('~') ? `${callerName(one)} (${one})` : callerName(one))).join(', ') || 'none yet'
       return `No call by "${args.caller.slice(0, 60)}" is in Kehikot’s record. The callers in it are: ${listed}.`
     }
-    calls = calls.filter((call) => call.by === caller)
+    calls = calls.filter((call) => callerOf(call) === caller)
   }
   if (text) calls = filtered(calls, { by: null, text })
   const first = read.calls[0]
@@ -119,7 +125,7 @@ export function trafficSaid(read: TrafficReadResult, args: Record<string, unknow
       ...(rows.length
         ? rows.map(
             (row) =>
-              `- ${row.name} (${row.by || 'unknown'}): ${row.calls} calls, ${row.perMinute} a minute, ${bytesSaid(row.bytes)}, ${Math.round(row.freeRate * 100)}% free, ${row.unlabelled} with no reason${row.seen ? `, ${row.seen} connections seen on its processes` : ''}`,
+              `- ${row.name}${row.by && !row.by.startsWith('~') ? ` (${row.by})` : ''}: ${row.calls} calls, ${row.perMinute} a minute, ${bytesSaid(row.bytes)}, ${Math.round(row.freeRate * 100)}% free, ${row.unlabelled} with no reason${row.seen ? `, ${row.seen} connections seen on its processes` : ''}`,
           )
         : ['- none']),
     )

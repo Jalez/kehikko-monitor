@@ -115,4 +115,16 @@ describe('what traffic says', () => {
     const old = trafficSaid({ ...read, budgets: [{ ...anonymous, name: 'GitHub API without an account', used: 3, left: 27 }] }, { view: 'summary' }, NOW)
     expect(old).toContain('- GitHub API without an account: 3 used, 27 left of 30 an hour.')
   })
+
+  test('a program Kehikot named, by its name or the start of it; sessions under their agent module', () => {
+    const curl = call({ at: NOW - 300, by: '', via: 'process', path: '/host/health', caller: { kind: 'program', name: 'curl, from your terminal (zsh)', how: 'process', process: 'curl', parent: 'zsh' } })
+    const session = call({ at: NOW - 200, by: 'kehikot.claude', via: 'process', path: '/mcp', caller: { kind: 'session', name: 'Claude session on Wide · methods', how: 'token', pid: 7 } })
+    const named = { ...read, calls: [...RECORD, curl, session], newest: RECORD.length + 2 }
+    expect(callerNamed('curl', ['~program:curl, from your terminal (zsh)'])).toBe('~program:curl, from your terminal (zsh)')
+    expect(trafficSaid(named, { view: 'calls', caller: 'curl' }, NOW)).toContain('curl, from your terminal (zsh) asks GET Kehikot /host/health')
+    const summary = trafficSaid(named, { view: 'summary' }, NOW)
+    expect(summary).toContain('- Claude: 1 session (kehikot.claude): 1 calls')
+    expect(summary).toContain('- curl, from your terminal (zsh): 1 calls')
+    expect(summary.toLowerCase()).not.toContain('unknown')
+  })
 })
