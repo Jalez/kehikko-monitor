@@ -1,6 +1,6 @@
 {
   "name": "kehikko-monitor",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "Monitor, a module a Kehikot host frames: the calls Kehikot and its modules make and receive on this computer, live, with their reasons and what repeats.",
@@ -22,7 +22,7 @@
     "@tanstack/react-virtual": "3.13.12",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "kehikot-module-protocol": "git+https://github.com/Jalez/kehikko-protocol.git#v2.25.0",
+    "kehikot-module-protocol": "git+https://github.com/Jalez/kehikko-protocol.git#v2.29.0",
     "lucide-react": "^1.33.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
