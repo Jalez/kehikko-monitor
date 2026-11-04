@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useRef, useState } from 'react'
 
 import type { TrafficCall } from 'kehikot-module-protocol'
 
@@ -114,19 +115,30 @@ describe('the choice is kept with the host', () => {
     const remembered: unknown[] = []
     let onPress: ((press: { item: string; value?: unknown }) => unknown) | undefined
     const read = { calls, newest: calls.length, oldest: 1, kept: 5000, started: 1 }
-    const host: Host = {
+    const base: Host = {
       where: 'hosted',
       projectPath: null,
       theme: 'light',
       header: () => {},
       request: async () => read,
-      kept: { style: 'bars' },
-      remember: (next) => remembered.push(next),
     }
+    /* As the protocol's useHost holds it: a remembered value is the kept value from the next render. */
     mock.module('../src/wire/use-kehikot.ts', () => ({
       useKehikot: (events: { onPress?: typeof onPress }) => {
         onPress = events.onPress
-        return host
+        const [kept, setKept] = useState<unknown>({ style: 'bars' })
+        const latest = useRef(kept)
+        latest.current = kept
+        return {
+          ...base,
+          kept,
+          read: () => ({ kept: latest.current }),
+          remember: (next: unknown) => {
+            remembered.push(next)
+            latest.current = next
+            setKept(next)
+          },
+        }
       },
     }))
     const { App } = await import('../src/app.tsx')
@@ -141,6 +153,11 @@ describe('the choice is kept with the host', () => {
     })
     expect(figure().getAttribute('data-style')).toBe('area')
     expect(remembered).toEqual([{ style: 'area' }])
+    /* The other switches are kept beside it, for this container. */
+    await act(async () => {
+      onPress!({ item: 'view', value: 'health' })
+    })
+    expect(remembered.at(-1)).toEqual({ style: 'area', view: 'health' })
     expect(onPress!({ item: 'style', value: 'pie' })).toBeTypeOf('string')
     expect(calls.map(callerOf)).toContain('kehikot.claude')
   })

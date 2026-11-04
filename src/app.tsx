@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { HeaderItem, PressValue } from 'kehikot-module-protocol'
-import { Cover, coverFor, useServerStanding } from 'kehikot-module-protocol/client/react'
+import { Cover, coverFor, useKept, useServerStanding } from 'kehikot-module-protocol/client/react'
 
 import { HeaderMenus } from '@/components/header-menus'
 import { footerItems } from '@/footer'
-import { headerItems, keptStyle, pressed, type HeaderState, type View } from '@/header'
+import { VIEWS, headerItems, pressed, type HeaderState, type View } from '@/header'
 import { emptySnapshot, judged as judge, latencies as latenciesOf } from '@/health/model'
 import { budgetLines } from '@/traffic/budgets'
-import { callerOf, colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat, type Style } from '@/traffic/model'
+import { RANGES, STYLES, callerOf, colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat, type Style } from '@/traffic/model'
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
 import { useHealth, type Health } from '@/wire/use-health'
@@ -23,17 +23,27 @@ import { Timeline } from '@/view/timeline'
 
 type Press = { item: string; value?: PressValue }
 
+const among = (list: readonly unknown[]) => (value: unknown) => list.includes(value)
+const isCaller = (value: unknown) => value === null || typeof value === 'string'
+
 /**
  * The page. It owns its state — the range, the pause, the caller shown, what was cleared — and
  * reads the host's record of traffic every second while it is open and not paused.
+ *
+ * What the header's switches chose — the view, the range, the chart, the caller — is kept with the
+ * host for this container (`useKept`), so each Monitor on each kehikko opens as it was left, after a
+ * restart too. The pause is not: a Monitor that came back paused would look broken.
  */
 export function App() {
-  const [view, setView] = useState<View>('traffic')
-  const [range, setRange] = useState<Range>(5)
+  const pressing = useRef<(press: Press) => unknown>(() => undefined)
+  const host = useKehikot({ onPress: (press) => pressing.current(press) as never })
+  const [view, setView] = useKept<View>(host, 'view', 'traffic', among(VIEWS))
+  const [range, setRange] = useKept<Range>(host, 'range', 5, among(RANGES))
+  const [style, setStyle] = useKept<Style>(host, 'style', 'lines', among(STYLES))
+  const [caller, setCaller] = useKept<Caller | null>(host, 'caller', null, isCaller)
   const [paused, setPaused] = useState(false)
-  const [caller, setCaller] = useState<Caller | null>(null)
   const [clearedAt, setClearedAt] = useState(0)
-  const [filter, setFilter] = useState<Filter>({ by: null, text: '' })
+  const [filter, setFilter] = useState<Filter>(() => ({ by: caller, text: '' }))
   const [order, setOrder] = useState<Caller[]>([])
   const callers = useRef<Caller[]>([])
 
@@ -49,15 +59,8 @@ export function App() {
       setCaller(said.caller)
       setFilter((was) => ({ ...was, by: said.caller }))
     } else setClearedAt(Date.now())
-  }, [])
-  const host = useKehikot({ onPress: press })
-  /* How the chart is drawn: kept with the host, so the choice is there on the next open; Lines until one is made. */
-  const [chosen, setStyle] = useState<Style | null>(null)
-  const style = chosen ?? keptStyle(host.kept)
-  const remember = host.remember
-  useEffect(() => {
-    if (chosen !== null) remember?.({ style: chosen })
-  }, [chosen, remember])
+  }, [setView, setRange, setStyle, setCaller])
+  pressing.current = press
   const traffic = useTraffic(host.where === 'hosted' ? host.request : null, paused, clearedAt)
   /* Read whatever the view: the footer says the health in both. */
   const health = useHealth(host.where === 'hosted', paused)
