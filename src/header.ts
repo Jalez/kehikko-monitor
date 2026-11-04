@@ -31,6 +31,8 @@ export interface HeaderState {
   caller: Caller | null
   /** The callers seen, in the order the timeline colours them. */
   callers: readonly Caller[]
+  /** The host draws the footer, which has Clear beside the readouts it clears (`footer.ts`). */
+  footed?: boolean
 }
 
 /** A header option id for a caller: its id, or what Kehikot named it (`unnamed` for a caller an older Kehikot could not). */
@@ -71,7 +73,7 @@ export function headerItems(state: HeaderState): HeaderItem[] {
       options: [{ id: EVERY, label: 'Every caller' }, ...callers.map((caller) => ({ id: callerOption(caller), label: clip(callerName(caller)) }))],
       value: callers.some((caller) => callerOption(caller) === value) ? value : EVERY,
     },
-    { kind: 'run', id: 'clear', label: 'Clear', state: 'idle' },
+    ...(state.footed ? [] : [{ kind: 'run', id: 'clear', label: 'Clear', state: 'idle' }]),
   ])
 }
 
