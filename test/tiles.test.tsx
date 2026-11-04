@@ -26,7 +26,7 @@ import {
 import { snapshotOf } from './health-fixtures.ts'
 
 /*
- * The glance tiles in a narrow container (Monitor 0.6.0): title and number in a row of their own
+ * The glance tiles in a narrow container (Monitor 0.7.0): title and number in a row of their own
  * above the plot, sparklines under 260 px and axes from there, a tooltip that says the value against
  * its limit and when — by pointer, finger or keyboard — and the disk as a doughnut with its words.
  */
