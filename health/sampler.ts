@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
 
-import { parseListeners, parsePs, startsIn, treeOf, type Disk, type DiskUse, type ModuleHealth, type Point, type Proc, type Snapshot, type Starts } from '../src/health/model.ts'
+import { parseListeners, parsePs, startsIn, treeOf, unexplained, type Disk, type DiskUse, type ModuleHealth, type Point, type Proc, type Snapshot, type Starts } from '../src/health/model.ts'
 
 /**
  * The health of the processes Kehikot runs on this computer, sampled by Monitor's server.
@@ -43,7 +43,6 @@ export const DISK_MS = 30 * 60_000
 /** How often agent worktrees are summed with `du`: rarely, because it reads every file's size in them. */
 export const WORKTREES_MS = 6 * 60 * 60_000
 const DAY_MS = 24 * 60 * 60_000
-const HOUR_MS = 60 * 60_000
 
 /** Where a person keeps code, under the home folder: agent worktrees are looked for here, three folders deep. */
 export const CODE_DIRS = ['Projects', 'projects', 'src', 'code', 'dev', 'Developer', 'repos', 'git', 'work']
@@ -436,11 +435,13 @@ export class Sampler {
   /** What is held, as one snapshot. */
   private said(): Snapshot {
     const now = this.deps.now()
+    const day = (times: readonly number[] | undefined) => times?.filter((at) => at >= now - DAY_MS) ?? []
+    const every = [...this.logs].map(([id, held]) => ({ id, starts: held.starts }))
     const modules: ModuleHealth[] = [...this.modules].map(([id, port]) => {
       const points = this.rings.get(id) ?? []
       const log = this.logs.get(id)?.starts
-      const starts = log?.starts.filter((at) => at >= now - DAY_MS) ?? []
-      const crashes = log?.crashes.filter((at) => at >= now - DAY_MS) ?? []
+      const starts = day(log?.starts)
+      const crashes = day(log?.crashes)
       return {
         id,
         port,
@@ -450,8 +451,11 @@ export class Sampler {
         points,
         starts: starts.length,
         crashes: crashes.length,
+        updates: day(log?.updates).length,
         startedAt: log?.starts.at(-1) ?? null,
-        crashedLately: crashes.some((at) => at >= now - HOUR_MS),
+        crashedAt: crashes,
+        /* Other modules' starts tell Kehikot's own starts (the app starting, restarting to update) from this module's. */
+        unexplainedAt: log ? day(unexplained(log, every.filter((one) => one.id !== id).map((one) => one.starts))) : [],
       }
     })
     return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, disk: this.disk, self: this.selfPoint, why: this.why }

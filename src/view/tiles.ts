@@ -172,8 +172,9 @@ export function callsTip(one: { by: string; p95: number; calls: number; errors: 
   return { value: `${msSaid(one.p95)} p95`, detail: clip(nameOf(one.by)), note: `${one.errors} of ${one.calls} failed` }
 }
 
-export function restartsTip(one: { id: string; starts: number; crashes: number }): Tip {
-  return { value: `${one.starts} ${one.starts === 1 ? 'start' : 'starts'}`, detail: clip(nameOf(one.id)), note: one.crashes ? `${one.crashes} after a crash` : 'no crash' }
+export function restartsTip(one: { id: string; starts: number; crashes: number; updates?: number }): Tip {
+  const note = one.crashes ? `${one.crashes} after a crash` : one.updates ? `${one.updates} after an update` : 'no crash'
+  return { value: `${one.starts} ${one.starts === 1 ? 'start' : 'starts'}`, detail: clip(nameOf(one.id)), note }
 }
 
 /* ---- the disk, as a doughnut ---- */

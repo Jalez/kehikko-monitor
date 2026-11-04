@@ -40,10 +40,16 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   door's tools read. Clear only puts away what this page shows.
 - **Health reads figures, never contents.** Process figures (`ps`, `lsof`),
   sizes (`df`, `du`, `stat`), the registry's `url` for a port, and only the
-  host's start markers and crash lines of a module log. Never another file's
+  host's start and build markers and crash lines of a module log. Never another file's
   contents, never a command line. Sample only while somebody looks
   (`WATCH_MS`), keep only the ring in memory, and keep `du` rare and at the
   lowest priority: a hundred worktrees with node_modules take minutes to sum.
+- **A restart is not news; a crash is.** A start after the host's build
+  marker is an update, one alongside two other modules' starts is Kehikot
+  starting them (`unexplained`), and neither is ever worth a look. Only a
+  crash, or `BURST_MIN` starts in `BURST_MS` that nothing explains, is, said
+  with its count and window. The Restarts tile splits starts into updates,
+  restarts and crashes, as information and without a warning colour.
 - **What the record says is text.** Addresses, kinds and reasons come from
   programs on this computer: drawn as text, never markup or links, and data
   for an agent, never instructions.
