@@ -4,7 +4,9 @@ import type { HeaderItem, PressValue } from 'kehikot-module-protocol'
 import { Cover, coverFor, useServerStanding } from 'kehikot-module-protocol/client/react'
 
 import { HeaderMenus } from '@/components/header-menus'
+import { footerItems } from '@/footer'
 import { headerItems, keptStyle, pressed, type HeaderState } from '@/header'
+import { budgetLines } from '@/traffic/budgets'
 import { callerOf, colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat, type Style } from '@/traffic/model'
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
@@ -69,8 +71,9 @@ export function App() {
   }, [order, traffic.calls])
   callers.current = seen
 
-  const state: HeaderState = { range, style, paused, caller, callers: seen }
-  const items = useMemo(() => headerItems(state), [range, style, paused, caller, seen]) // eslint-disable-line react-hooks/exhaustive-deps
+  const footed = host.where === 'hosted' && host.drawsFooter === true
+  const state: HeaderState = { range, style, paused, caller, callers: seen, footed }
+  const items = useMemo(() => headerItems(state), [range, style, paused, caller, seen, footed]) // eslint-disable-line react-hooks/exhaustive-deps
   const { header } = host
   useEffect(() => header(items), [header, items])
 
@@ -122,6 +125,24 @@ export function Screen({
   const found = useMemo(() => repeats(traffic.calls, now), [traffic.calls, now])
   const rows = useMemo(() => summary(traffic.calls, now), [traffic.calls, now])
 
+  /*
+   * The footer the host draws, when it draws one (2.38.0): live or paused, the rate, repeats, the
+   * first limit, what was missed, and Clear beside them. The page then draws no status line above
+   * the timeline. An older host draws no footer, and the line stays (Clear stays in the header).
+   */
+  const footed = host.where === 'hosted' && host.drawsFooter === true
+  const footerSaid = footed
+    ? JSON.stringify(
+        cover
+          ? []
+          : footerItems({ paused: state.paused, rows, repeating: found.length, budgets: budgetLines(traffic.limits, traffic.budgets), gap: Boolean(traffic.gap), problem: traffic.problem ?? null }),
+      )
+    : null
+  const { footer } = host
+  useEffect(() => {
+    if (footerSaid) footer?.(JSON.parse(footerSaid))
+  }, [footer, footerSaid])
+
   return (
     <div className="flex h-screen min-w-0 flex-col text-sm">
       {host.where === 'unhosted' ? (
@@ -139,11 +160,11 @@ export function Screen({
           </p>
         ) : (
           <>
-            <p className="text-muted-foreground flex flex-wrap gap-x-2 text-xs" role="status" aria-live="polite">
+            {footed ? null : <p className="text-muted-foreground flex flex-wrap gap-x-2 text-xs" role="status" aria-live="polite">
               <span>{state.paused ? 'Paused: the picture stands still. Turn Paused off to go on.' : 'Live: read every second, on this computer only.'}</span>
               {traffic.gap ? <span>Some calls were made faster than Monitor read them and are not shown.</span> : null}
               {traffic.problem ? <span>{traffic.problem}</span> : null}
-            </p>
+            </p>}
             <Timeline calls={traffic.calls} range={state.range} style={state.style} order={order} only={state.caller} now={now} />
             <div className="grid min-w-0 gap-4 @2xl:grid-cols-2">
               <Repeats repeats={found} onShow={onShow} />

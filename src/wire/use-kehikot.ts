@@ -9,7 +9,8 @@ import { ID } from '../../manifest.ts'
  * computer, not a project, so it reads no project, epic or parts. What it keeps with the host
  * (`kept`, `remember`) is how its chart is drawn, and nothing else.
  */
-export type Host = Pick<ProtocolHost, 'where' | 'projectPath' | 'theme' | 'header' | 'request'> & Partial<Pick<ProtocolHost, 'kept' | 'remember'>>
+export type Host = Pick<ProtocolHost, 'where' | 'projectPath' | 'theme' | 'header' | 'request'> &
+  Partial<Pick<ProtocolHost, 'kept' | 'remember' | 'footer' | 'drawsFooter'>>
 
 export function useKehikot(events: HostEvents = {}): Host {
   return useHost(ID, events)
