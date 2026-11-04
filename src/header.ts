@@ -3,7 +3,7 @@ import { LIMITS, headerItemsSchema, type HeaderItem } from 'kehikot-module-proto
 import { RANGES, STYLES, STYLE_SAID, callerName, type Caller, type Range, type Style } from './traffic/model.ts'
 
 /**
- * What Monitor puts in its container's header: the range of the timeline, how it is drawn (Chart:
+ * What Monitor puts in its container's header: the view (Traffic or Health), the range of the timeline, how it is drawn (Chart:
  * lines, bars or area), pause, which caller to show, and Clear. The host draws them; this page owns the state and declares the whole list again
  * whenever it changes.
  *
@@ -22,7 +22,14 @@ export const CALLERS_LISTED = 12
 /** The option of the Caller switch that is every caller. Not a module id: those have a dot. */
 export const EVERY = 'all'
 
+/** What the page shows: the calls, or the health of the processes. */
+export const VIEWS = ['traffic', 'health'] as const
+export type View = (typeof VIEWS)[number]
+export const VIEW_SAID: Record<View, string> = { traffic: 'Traffic', health: 'Health' }
+
 export interface HeaderState {
+  /** Traffic until somebody picks Health. Not kept: Monitor keeps only the chart style. */
+  view?: View
   range: Range
   /** How the timeline is drawn; kept with the host (`state.set`), so it is the same next time. */
   style: Style
@@ -47,7 +54,18 @@ const clip = (label: string) => (label.length > LABEL_FIT ? `${label.slice(0, LA
 export function headerItems(state: HeaderState): HeaderItem[] {
   const callers = state.callers.slice(0, CALLERS_LISTED)
   const value = state.caller === null ? EVERY : callerOption(state.caller)
+  const view: HeaderItem = {
+    kind: 'switch',
+    id: 'view',
+    label: 'View',
+    agents: true,
+    options: VIEWS.map((one) => ({ id: one, label: VIEW_SAID[one] })),
+    value: state.view ?? 'traffic',
+  }
+  /* Health has nothing of the timeline to set up: only what it shows, and the pause. */
+  if (state.view === 'health') return headerItemsSchema.parse([view, { kind: 'toggle', id: 'pause', label: 'Paused', agents: true, checked: state.paused }])
   return headerItemsSchema.parse([
+    view,
     {
       kind: 'switch',
       id: 'range',
@@ -88,10 +106,11 @@ export function keptStyle(kept: unknown): Style {
   return (STYLES as readonly unknown[]).includes(style) ? (style as Style) : 'lines'
 }
 
-export type Pressed = { range: Range } | { style: Style } | { paused: boolean } | { caller: Caller | null } | { clear: true }
+export type Pressed = { view: View } | { range: Range } | { style: Style } | { paused: boolean } | { caller: Caller | null } | { clear: true }
 
 /** What a press asks for, or a sentence saying why it was not taken. */
 export function pressed(item: string, value: unknown, callers: readonly Caller[]): Pressed | string {
+  if (item === 'view') return (VIEWS as readonly unknown[]).includes(value) ? { view: value as View } : `"${String(value).slice(0, 40)}" is not a view Monitor has: traffic or health.`
   if (item === 'range') {
     const minutes = typeof value === 'string' ? Number(value.replace(/^m/, '')) : NaN
     return (RANGES as readonly number[]).includes(minutes) ? { range: minutes as Range } : `"${String(value).slice(0, 40)}" is not a range Monitor shows.`

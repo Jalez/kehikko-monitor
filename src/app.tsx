@@ -5,11 +5,15 @@ import { Cover, coverFor, useServerStanding } from 'kehikot-module-protocol/clie
 
 import { HeaderMenus } from '@/components/header-menus'
 import { footerItems } from '@/footer'
-import { headerItems, keptStyle, pressed, type HeaderState } from '@/header'
+import { headerItems, keptStyle, pressed, type HeaderState, type View } from '@/header'
+import { emptySnapshot, judged as judge, latencies as latenciesOf } from '@/health/model'
 import { budgetLines } from '@/traffic/budgets'
 import { callerOf, colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat, type Style } from '@/traffic/model'
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
+import { useHealth, type Health } from '@/wire/use-health'
+
+import { HealthView } from '@/view/health'
 
 import { Calls } from '@/view/calls'
 import { Connections } from '@/view/connections'
@@ -24,6 +28,7 @@ type Press = { item: string; value?: PressValue }
  * reads the host's record of traffic every second while it is open and not paused.
  */
 export function App() {
+  const [view, setView] = useState<View>('traffic')
   const [range, setRange] = useState<Range>(5)
   const [paused, setPaused] = useState(false)
   const [caller, setCaller] = useState<Caller | null>(null)
@@ -36,7 +41,8 @@ export function App() {
   const press = useCallback(({ item, value }: Press) => {
     const said = pressed(item, value, callers.current)
     if (typeof said === 'string') return said
-    if ('range' in said) setRange(said.range)
+    if ('view' in said) setView(said.view)
+    else if ('range' in said) setRange(said.range)
     else if ('style' in said) setStyle(said.style)
     else if ('paused' in said) setPaused(said.paused)
     else if ('caller' in said) {
@@ -53,6 +59,8 @@ export function App() {
     if (chosen !== null) remember?.({ style: chosen })
   }, [chosen, remember])
   const traffic = useTraffic(host.where === 'hosted' ? host.request : null, paused, clearedAt)
+  /* Read whatever the view: the footer says the health in both. */
+  const health = useHealth(host.where === 'hosted', paused)
 
   /* A colour follows its caller from the moment it first called, whatever the filter or the ranks. */
   useEffect(() => {
@@ -72,8 +80,8 @@ export function App() {
   callers.current = seen
 
   const footed = host.where === 'hosted' && host.drawsFooter === true
-  const state: HeaderState = { range, style, paused, caller, callers: seen, footed }
-  const items = useMemo(() => headerItems(state), [range, style, paused, caller, seen, footed]) // eslint-disable-line react-hooks/exhaustive-deps
+  const state: HeaderState = { view, range, style, paused, caller, callers: seen, footed }
+  const items = useMemo(() => headerItems(state), [view, range, style, paused, caller, seen, footed]) // eslint-disable-line react-hooks/exhaustive-deps
   const { header } = host
   useEffect(() => header(items), [header, items])
 
@@ -81,6 +89,7 @@ export function App() {
     <Screen
       host={host}
       traffic={traffic}
+      health={health}
       items={items}
       state={state}
       order={order}
@@ -96,6 +105,7 @@ export function App() {
 export function Screen({
   host,
   traffic,
+  health = { snapshot: emptySnapshot(), problem: null },
   items,
   state,
   order,
@@ -107,6 +117,7 @@ export function Screen({
 }: {
   host: Host
   traffic: Traffic
+  health?: Health
   items: HeaderItem[]
   state: HeaderState
   order: readonly Caller[]
@@ -124,6 +135,9 @@ export function Screen({
   const now = given ?? traffic.at ?? Date.now()
   const found = useMemo(() => repeats(traffic.calls, now), [traffic.calls, now])
   const rows = useMemo(() => summary(traffic.calls, now), [traffic.calls, now])
+  const ports = useMemo(() => new Map(health.snapshot.modules.flatMap((m) => (m.port === null ? [] : [[m.id, m.port] as [string, number]]))), [health.snapshot])
+  const lat = useMemo(() => latenciesOf(traffic.calls, now, ports), [traffic.calls, now, ports])
+  const ranked = useMemo(() => judge(health.snapshot, lat, now), [health.snapshot, lat, now])
 
   /*
    * The footer the host draws, when it draws one (2.38.0): live or paused, the rate, repeats, the
@@ -135,7 +149,7 @@ export function Screen({
     ? JSON.stringify(
         cover
           ? []
-          : footerItems({ paused: state.paused, rows, repeating: found.length, budgets: budgetLines(traffic.limits, traffic.budgets), gap: Boolean(traffic.gap), problem: traffic.problem ?? null }),
+          : footerItems({ paused: state.paused, rows, repeating: found.length, budgets: budgetLines(traffic.limits, traffic.budgets), gap: Boolean(traffic.gap), problem: traffic.problem ?? null, health: { snapshot: health.snapshot, judged: ranked } }),
       )
     : null
   const { footer } = host
@@ -154,6 +168,8 @@ export function Screen({
       <main key={again} className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
         {cover ? (
           <Cover state={cover} name="Monitor" onRetry={() => setAgain((n) => n + 1)} />
+        ) : state.view === 'health' ? (
+          <HealthView snapshot={health.snapshot} judged={ranked} latencies={lat} problem={health.problem} now={now} />
         ) : traffic.problem && !traffic.calls.length ? (
           <p className="text-muted-foreground rounded-md border p-3 text-xs" role="status">
             {traffic.problem}

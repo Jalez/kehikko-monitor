@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 
 import { skillPath, skillTextIssue } from 'kehikot-module-protocol'
 
-import { ASK, CLOCK, MANIFEST, answer, callerNamed, servingAt, trafficSaid } from '../doors.ts'
+import { ASK, CLOCK, HEALTH, MANIFEST, answer, callerNamed, servingAt, trafficSaid } from '../doors.ts'
+import { snapshotOf } from './health-fixtures.ts'
 import { ID } from '../manifest.ts'
 import { call, polling } from './fixtures.ts'
 
@@ -43,11 +44,41 @@ describe('the doors', () => {
     expect((await answer('GET', '/api/nothing', none, null, null))?.status).toBe(404)
   })
 
-  test('the MCP door lists one read-only tool, traffic', async () => {
+  test('the MCP door lists two read-only tools, traffic and health', async () => {
     expect((await answer('GET', '/mcp', none, null, null))?.status).toBe(405)
     const tools = (await rpc('tools/list')).result.tools!
-    expect(tools.map((one) => one.name)).toEqual(['traffic'])
-    expect(tools[0]!.annotations?.readOnlyHint).toBe(true)
+    expect(tools.map((one) => one.name)).toEqual(['traffic', 'health'])
+    expect(tools.every((one) => one.annotations?.readOnlyHint === true)).toBe(true)
+  })
+
+  test('/api/health answers the sampler’s snapshot to a GET, and refuses anything else', async () => {
+    HEALTH.snapshot = async () => snapshotOf(NOW)
+    const reply = await answer('GET', '/api/health', none, null, null)
+    expect(reply?.status).toBe(200)
+    expect((reply?.body as { modules: unknown[] }).modules.length).toBeGreaterThan(0)
+    expect((await answer('POST', '/api/health', none, {}, null))?.status).toBe(405)
+  })
+
+  test('health says what is slow or heavy, the worst first, with call times from the host’s record', async () => {
+    refusal = null
+    HEALTH.snapshot = async () => snapshotOf(NOW)
+    const said = (await rpc('tools/call', { name: 'health', arguments: {} })).result.content![0]!.text
+    expect(said).toContain('Worth a look, the worst first:')
+    expect(said.indexOf('Diff: crashed in the last hour')).toBeLessThan(said.indexOf('Kanban'))
+    expect(said).toContain('Kanban: 120% CPU')
+    expect(said).toContain('Monitor itself')
+    const calls = (await rpc('tools/call', { name: 'health', arguments: { view: 'calls' } })).result.content![0]!.text
+    expect(calls).toContain('Kanban: made')
+    const disk = (await rpc('tools/call', { name: 'health', arguments: { view: 'disk' } })).result.content![0]!.text
+    expect(disk).toContain('40 worktrees, 30 with node_modules')
+  })
+
+  test('health still answers when the host keeps no record: only the call times are missing', async () => {
+    refusal = { reason: 'unknown-method', error: 'traffic.read is not one of them' }
+    HEALTH.snapshot = async () => snapshotOf(NOW)
+    const said = (await rpc('tools/call', { name: 'health', arguments: { view: 'calls' } })).result.content![0]!.text
+    expect(said).toContain('call times are missing')
+    refusal = null
   })
 
   test('traffic reads the host’s record as Monitor, about no project, and says what repeats', async () => {
