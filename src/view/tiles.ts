@@ -1,12 +1,14 @@
-import { LIMITS, msSaid, nameOf, percent, sizeSaid, type Disk } from '../health/model.ts'
+import { msSaid, nameOf, percent, sizeSaid, type Disk } from '../health/model.ts'
 
 /**
  * How the Health view's glance tiles are laid out at a width, what each chart's tooltip says, and the
  * disk's doughnut. Pure: the page draws it, the tests read it.
  *
- * A tile is three rows, never overlaid: its title and number, a line in words, then the plot at a
- * height of its own. A narrow tile (under `AXES_FROM`) draws a sparkline, with no axes and no grid;
- * a wider one adds a y-axis with two ticks, the first and last time, and horizontal gridlines.
+ * The tiles carry no card of their own: no border, no background, no gap, only a hairline between
+ * them and a tight padding. In one column a tile is a compact row — its title, a line in words and
+ * its number on one line, the plot directly under it, edge to edge. Side by side, the words go on a
+ * line of their own under the title. A narrow tile (under `AXES_FROM`) draws a sparkline, with no
+ * axes and no grid; a wider one adds a y-axis with two ticks, the first and last time, and gridlines.
  */
 
 /** From this tile width up, a chart has axes and gridlines; below it, a sparkline. */
@@ -14,10 +16,20 @@ export const AXES_FROM = 260
 /** The plot's own height: a sparkline, and a chart with axes. Both are a comfortable touch target. */
 export const SPARK_HEIGHT = 44
 export const AXES_HEIGHT = 72
-/** The disk's doughnut, across: as tall as a sparkline, larger beside axes so its hole can hold a word. */
+/** The disk's doughnut, across: beside axes, large enough for a word in its hole; beside its list; alone. */
 export const RING_WIDE = 88
-/** The gap between tiles, in px (`gap-2`). */
-export const GAP = 8
+export const RING_MID = 64
+/** One row of the doughnut's list, in px. */
+export const LEGEND_ROW = 14
+/** The hairline between tiles, in px: the grid's gap, showing the border colour behind the tiles. */
+export const DIVIDER = 1
+/** A tile's padding, in px: across, and above and below. A line plot runs through the padding across. */
+export const PAD_X = 8
+export const PAD_Y = 6
+/** A tile's head row (its title and number) and its line in words, in px; the gap under each row. */
+export const HEAD_HEIGHT = 20
+export const SUB_HEIGHT = 16
+export const ROW_GAP = 2
 
 export interface TileLayout {
   /** Tiles side by side: one under 360 px, three under 640, then five (the grid's container queries). */
@@ -31,18 +43,37 @@ export interface TileLayout {
   ring: number
   /** Whether the disk's list of segments shows beside its doughnut (else it is read by screen readers only). */
   legend: boolean
+  /** One row per tile: title, words and number on one line, the plot under it. */
+  compact: boolean
 }
 
 export function columnsOf(width: number): number {
   return width < 360 ? 1 : width < 640 ? 3 : 5
 }
 
+/** In three columns the disk takes the last two cells, so the grid has no hole and the doughnut room for its list. */
+export const diskSpan = (columns: number): number => (columns === 3 ? 2 : 1)
+
 export function tileLayout(width: number | null): TileLayout {
-  if (width === null || width <= 0) return { columns: 1, tile: null, axes: false, plot: SPARK_HEIGHT, ring: SPARK_HEIGHT, legend: false }
+  if (width === null || width <= 0) return { columns: 1, tile: null, axes: false, plot: SPARK_HEIGHT, ring: SPARK_HEIGHT, legend: false, compact: true }
   const columns = columnsOf(width)
-  const tile = Math.floor((width - GAP * (columns - 1)) / columns)
+  const tile = Math.floor((width - DIVIDER * (columns - 1)) / columns)
+  const span = diskSpan(columns)
+  const disk = tile * span + DIVIDER * (span - 1)
   const axes = tile >= AXES_FROM
-  return { columns, tile, axes, plot: axes ? AXES_HEIGHT : SPARK_HEIGHT, ring: axes ? RING_WIDE : SPARK_HEIGHT, legend: tile >= 180 }
+  const legend = disk >= 180
+  return { columns, tile, axes, plot: axes ? AXES_HEIGHT : SPARK_HEIGHT, ring: axes ? RING_WIDE : legend ? RING_MID : SPARK_HEIGHT, legend, compact: columns === 1 }
+}
+
+/** The disk's plot row: as tall as its doughnut, or its list beside it when that is taller, never cut off. */
+export function ringRow(layout: Pick<TileLayout, 'ring' | 'legend'>, segments: number): number {
+  return Math.max(layout.ring, layout.legend ? segments * LEGEND_ROW : 0)
+}
+
+/** How tall the five tiles stand in one column, in px: four plots, the disk's row, and the hairlines between. */
+export function columnHeight(layout: TileLayout, segments: number): number {
+  const chrome = 2 * PAD_Y + HEAD_HEIGHT + ROW_GAP + (layout.compact ? 0 : SUB_HEIGHT + ROW_GAP)
+  return 4 * (chrome + layout.plot) + chrome + ringRow(layout, segments) + 4 * DIVIDER
 }
 
 /* ---- pointing at a chart ---- */
@@ -75,11 +106,23 @@ export function segmentAt(x: number, y: number, size: number, fractions: readonl
   return fractions.length - 1
 }
 
-/** Where a tooltip sits over its plot, so it never runs off the tile: under the point, kept inside. */
+/** Where a tooltip sits along its plot, so it never runs off the tile: under the point, kept inside. */
 export function tipAlign(index: number, count: number): 'start' | 'center' | 'end' {
   if (count <= 1) return 'center'
   const at = index / (count - 1)
   return at < 1 / 3 ? 'start' : at > 2 / 3 ? 'end' : 'center'
+}
+
+/** The space between a tooltip and its plot, in px. */
+export const TIP_GAP = 4
+
+/**
+ * Whether a tooltip goes above its plot or below it — outside the plot either way, so it never lies
+ * over the chart's own labels. Above when it fits under the top of what clips the page (`room`: the
+ * px from there to the plot's top), else below.
+ */
+export function tipSide(room: number, tipHeight: number): 'above' | 'below' {
+  return room >= tipHeight + TIP_GAP ? 'above' : 'below'
 }
 
 /** The key that moves the point a chart's tooltip is on: the next index, or null to close it. */
@@ -96,37 +139,41 @@ export function stepped(key: string, index: number | null, count: number): numbe
 
 /* ---- what a tooltip says ---- */
 
-/** A tooltip: the value against its limit, what it is, and when. */
+/**
+ * A tooltip: three short lines at most. The value first (drawn bold), then what or whose it is, then
+ * a muted note — the time of the point, or a second figure. An empty line is left out.
+ */
 export interface Tip {
   value: string
   detail: string
-  at: string
+  note: string
 }
+
+/** The longest line a tooltip holds, in characters: it fits about 15 rem at 12 px without wrapping. */
+export const TIP_LINE_MAX = 28
+
+/** A tooltip's lines, in order, none empty. */
+export const tipLines = (tip: Tip): string[] => [tip.value, tip.detail, tip.note].filter(Boolean)
+
+/** A name cut to fit a tooltip's line. */
+export const clip = (text: string, most = TIP_LINE_MAX): string => (text.length <= most ? text : `${text.slice(0, most - 1).trimEnd()}…`)
 
 export const clock = (t: number): string => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
 export function cpuTip(point: { at: number; cpu: number }, of: number): Tip {
-  return { value: `${percent(point.cpu)} CPU`, detail: `${Math.round(point.cpu * 10) / 10} of ${of} cores`, at: clock(point.at) }
+  return { value: `${percent(point.cpu)} CPU`, detail: `${Math.round(point.cpu * 10) / 10} of ${of} cores`, note: clock(point.at) }
 }
 
 export function memoryTip(point: { at: number; rss: number }, of: number): Tip {
-  return { value: sizeSaid(point.rss), detail: of ? `of ${sizeSaid(of)} (${percent(point.rss / of)})` : 'resident', at: clock(point.at) }
+  return { value: sizeSaid(point.rss), detail: of ? `${percent(point.rss / of)} of ${sizeSaid(of)}` : '', note: clock(point.at) }
 }
 
-export function callsTip(one: { by: string; p95: number; p50: number | null; calls: number; errors: number }): Tip {
-  return {
-    value: `${msSaid(one.p95)} p95`,
-    detail: `${nameOf(one.by)} · ${one.errors} of ${one.calls} failed · flagged from ${msSaid(LIMITS.p95Warn)}`,
-    at: 'last 5 min',
-  }
+export function callsTip(one: { by: string; p95: number; calls: number; errors: number }): Tip {
+  return { value: `${msSaid(one.p95)} p95`, detail: clip(nameOf(one.by)), note: `${one.errors} of ${one.calls} failed` }
 }
 
 export function restartsTip(one: { id: string; starts: number; crashes: number }): Tip {
-  return {
-    value: `${one.starts} ${one.starts === 1 ? 'start' : 'starts'}`,
-    detail: `${nameOf(one.id)} · ${one.crashes ? `${one.crashes} after a crash` : 'no crash'} · flagged from ${LIMITS.startsWarn}`,
-    at: 'last 24 h',
-  }
+  return { value: `${one.starts} ${one.starts === 1 ? 'start' : 'starts'}`, detail: clip(nameOf(one.id)), note: one.crashes ? `${one.crashes} after a crash` : 'no crash' }
 }
 
 /* ---- the disk, as a doughnut ---- */
@@ -179,7 +226,7 @@ export function diskSegments(disk: Disk): Segment[] {
 }
 
 export function segmentTip(one: Segment): Tip {
-  return { value: one.short, detail: `${sizeSaid(one.bytes)} (${percent(one.fraction)})`, at: '' }
+  return { value: `${sizeSaid(one.bytes)} · ${percent(one.fraction)}`, detail: one.short, note: '' }
 }
 
 /** The doughnut as a sentence: every segment and its size. */

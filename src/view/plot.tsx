@@ -1,6 +1,6 @@
-import { useId, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 
-import { indexAt, segmentAt, stepped, tipAlign, type Tip } from '@/view/tiles'
+import { indexAt, PAD_X, segmentAt, stepped, TIP_GAP, tipAlign, tipSide, type Tip } from '@/view/tiles'
 
 /**
  * One tile's plot: the chart, the point a person is on, and a small tooltip saying it. The same for a
@@ -9,14 +9,19 @@ import { indexAt, segmentAt, stepped, tipAlign, type Tip } from '@/view/tiles'
  * point to mark (`children(active)`).
  *
  * The chart is an image of its sentence (`said`, what a screen reader reads first); the tooltip is a
- * polite live region beside it, so each point is read as the keyboard moves. It sits inside the tile,
- * on the side away from the edge, and never makes the page scroll sideways.
+ * polite live region beside it, so each point is read as the keyboard moves. The tooltip is solid
+ * (the popover token, a strong border and a shadow), 12 px, three short lines at most (`Tip`), and
+ * sits outside the plot — above it when there is room, else below — so it never lies over the chart's
+ * labels. Along the plot it leans away from the edge and never makes the page scroll sideways.
+ *
+ * A line or bar plot runs through the tile's padding, edge to edge.
  */
 export function Plot({
   said,
   count,
   kind,
   height,
+  ring = height,
   tip,
   testId,
   fractions = [],
@@ -26,8 +31,10 @@ export function Plot({
   said: string
   count: number
   kind: 'line' | 'bar' | 'ring'
-  /** The plot's height in px; a ring is as wide as it is tall. */
+  /** The plot's height in px. */
   height: number
+  /** A ring's size across, in px; it sits in the middle of the plot's height. */
+  ring?: number
   tip: (index: number) => Tip
   testId: string
   /** A ring's segments, as shares adding up to 1. */
@@ -37,14 +44,22 @@ export function Plot({
   children: (active: number | null) => ReactNode
 }) {
   const id = useId()
+  const box = useRef<HTMLDivElement>(null)
+  const tipBox = useRef<HTMLDivElement>(null)
   const [active, setActive] = useState<number | null>(null)
+  const [side, setSide] = useState<'above' | 'below'>('above')
   const shown = active !== null && active < count ? active : null
 
+  useLayoutEffect(() => {
+    if (shown === null || !box.current || !tipBox.current) return
+    setSide(tipSide(box.current.getBoundingClientRect().top - clipTop(box.current), tipBox.current.offsetHeight))
+  }, [shown])
+
   const point = (event: PointerEvent<HTMLDivElement>) => {
-    const box = event.currentTarget.getBoundingClientRect()
-    const x = event.clientX - box.left
-    const y = event.clientY - box.top
-    setActive(kind === 'ring' ? segmentAt(x, y, height, fractions) : indexAt(x, box.width, count, kind))
+    const rect = event.currentTarget.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    setActive(kind === 'ring' ? segmentAt(x, y, ring, fractions) : indexAt(x, rect.width, count, kind))
   }
   const key = (event: KeyboardEvent<HTMLDivElement>) => {
     const next = stepped(event.key, shown, count)
@@ -54,19 +69,25 @@ export function Plot({
   }
 
   const align = kind === 'ring' ? 'start' : tipAlign(shown ?? 0, count)
-  const place: CSSProperties =
-    kind === 'ring' ? { left: height + 8, right: 0, top: 0 } : align === 'start' ? { left: 0, top: 0 } : align === 'end' ? { right: 0, top: 0 } : { left: '50%', top: 0, transform: 'translateX(-50%)' }
+  const across: CSSProperties = align === 'start' ? { left: TIP_GAP } : align === 'end' ? { right: TIP_GAP } : { left: '50%', transform: 'translateX(-50%)' }
+  const place: CSSProperties = { ...across, ...(side === 'above' ? { bottom: `calc(100% + ${TIP_GAP}px)` } : { top: `calc(100% + ${TIP_GAP}px)` }) }
   const told = shown === null ? null : tip(shown)
 
   return (
-    <div className={`relative min-w-0 ${kind === 'ring' ? 'flex items-center gap-2' : ''}`} style={{ height }} data-testid={`${testId}-plot`} data-kind={kind}>
+    <div
+      ref={box}
+      className={`relative min-w-0 ${kind === 'ring' ? 'flex items-center gap-2' : ''}`}
+      style={{ height, marginInline: kind === 'ring' ? undefined : -PAD_X }}
+      data-testid={`${testId}-plot`}
+      data-kind={kind}
+    >
       <div
         role="img"
         aria-label={said}
         aria-describedby={told ? `${id}-tip` : undefined}
         tabIndex={count ? 0 : -1}
-        className="focus-visible:ring-ring h-full shrink-0 touch-pan-y rounded-sm outline-none focus-visible:ring-2"
-        style={{ width: kind === 'ring' ? height : '100%' }}
+        className="focus-visible:ring-ring shrink-0 touch-pan-y rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset"
+        style={kind === 'ring' ? { width: ring, height: ring } : { width: '100%', height: '100%' }}
         onFocus={() => setActive((was) => was ?? (kind === 'ring' ? 0 : count - 1))}
         onBlur={() => setActive(null)}
         onKeyDown={key}
@@ -80,23 +101,36 @@ export function Plot({
       </div>
       {aside}
       <div
+        ref={tipBox}
         id={`${id}-tip`}
         role="status"
         aria-live="polite"
         data-testid={`${testId}-tip`}
-        className={told ? `bg-popover text-popover-foreground border-border pointer-events-none absolute z-10 ${kind === 'ring' ? '' : 'w-max max-w-full'} rounded-md border px-1.5 py-0.5 text-[11px] leading-tight shadow-md` : 'sr-only'}
+        data-side={told ? side : undefined}
+        className={
+          told
+            ? 'bg-popover text-popover-foreground border-foreground/25 pointer-events-none absolute z-20 w-max max-w-[min(15rem,calc(100%-8px))] rounded-md border px-2 py-1.5 text-xs leading-snug break-words shadow-lg'
+            : 'sr-only'
+        }
         style={told ? place : undefined}
       >
         {told ? (
           <>
-            <span className="flex items-baseline gap-1.5">
-              <span className="font-semibold tabular-nums">{told.value}</span>
-              {told.at ? <span className="text-muted-foreground tabular-nums">{told.at}</span> : null}
-            </span>
-            {told.detail ? <span className="text-muted-foreground block tabular-nums">{told.detail}</span> : null}
+            <span className="block font-semibold tabular-nums">{told.value}</span>
+            {told.detail ? <span className="block tabular-nums">{told.detail}</span> : null}
+            {told.note ? <span className="text-muted-foreground block tabular-nums">{told.note}</span> : null}
           </>
         ) : null}
       </div>
     </div>
   )
+}
+
+/** The top of what clips the plot (its nearest scrolling or clipping ancestor), else of the window, in px. */
+function clipTop(from: HTMLElement): number {
+  for (let at = from.parentElement; at; at = at.parentElement) {
+    const { overflowY } = getComputedStyle(at)
+    if (overflowY !== 'visible') return at.getBoundingClientRect().top
+  }
+  return 0
 }

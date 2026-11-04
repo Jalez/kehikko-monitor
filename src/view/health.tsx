@@ -31,14 +31,22 @@ import {
   centreLabel,
   cpuTip,
   diskSegments,
+  HEAD_HEIGHT,
   HOLE,
+  LEGEND_ROW,
   memoryTip,
   niceTop,
+  PAD_X,
+  PAD_Y,
   restartsTip,
+  ringRow,
+  ROW_GAP,
+  SUB_HEIGHT,
   segmentsSaid,
   segmentTip,
   tileLayout,
   type Segment,
+  type TileLayout,
   type SegmentKey,
 } from '@/view/tiles'
 import { useBox } from '@/view/use-box'
@@ -138,18 +146,20 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
   const worktrees = worktreesOf(snapshot.disk)
   const disk = diskLevel(snapshot.disk)
   return (
-    <div className="grid min-w-0 shrink-0 grid-cols-1 gap-2 @min-[360px]:grid-cols-3 @min-[640px]:grid-cols-5" data-testid="tiles" data-axes={layout.axes}>
-      <Tile title="CPU" value={percent(sum.cpu)} sub={`${sum.running} running · ${snapshot.cores} cores`} testId="tile-cpu">
+    /* No cards: the grid's 1 px gap shows the border colour between tiles, which stand on the page's own background. */
+    <div className="bg-border grid min-w-0 shrink-0 grid-cols-1 gap-px @min-[360px]:grid-cols-3 @min-[640px]:grid-cols-5" data-testid="tiles" data-axes={layout.axes} data-compact={layout.compact}>
+      <Tile layout={layout} title="CPU" value={percent(sum.cpu)} sub={`${sum.running} running · ${snapshot.cores} cores`} testId="tile-cpu">
         <Plot said={cpuSaid(snapshot)} count={over.length > 1 ? over.length : 0} kind="line" height={layout.plot} tip={(i) => cpuTip(over[i] as (typeof over)[number], snapshot.cores)} testId="tile-cpu">
           {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="cpu" config={CPU} axes={layout.axes} active={active} format={(v) => percent(v)} /> : null)}
         </Plot>
       </Tile>
-      <Tile title="Memory" value={sizeSaid(sum.rss)} sub={snapshot.memory ? `of ${sizeSaid(snapshot.memory)}` : 'resident'} testId="tile-memory">
+      <Tile layout={layout} title="Memory" value={sizeSaid(sum.rss)} sub={snapshot.memory ? `of ${sizeSaid(snapshot.memory)}` : 'resident'} testId="tile-memory">
         <Plot said={memorySaid(snapshot)} count={over.length > 1 ? over.length : 0} kind="line" height={layout.plot} tip={(i) => memoryTip(over[i] as (typeof over)[number], snapshot.memory)} testId="tile-memory">
           {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="gb" config={MEMORY} axes={layout.axes} active={active} format={(v) => `${v} GB`} /> : null)}
         </Plot>
       </Tile>
       <Tile
+        layout={layout}
         title="Calls"
         value={slow[0] ? `${msSaid(slow[0].p95)} p95` : 'none timed'}
         sub={calls ? `${errors} of ${calls} failed` : 'last 5 minutes'}
@@ -160,7 +170,7 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
           {(active) => (slow.length ? <Bars data={slow} dataKey="p95" config={CALLS} axes={layout.axes} active={active} format={(v) => msSaid(v)} /> : null)}
         </Plot>
       </Tile>
-      <Tile title="Restarts" value={`${starts} today`} sub={crashes ? `${crashes} after a crash` : 'no crash'} subTone={crashes ? 'text-destructive' : undefined} testId="tile-restarts">
+      <Tile layout={layout} title="Restarts" value={`${starts} today`} sub={crashes ? `${crashes} after a crash` : 'no crash'} subTone={crashes ? 'text-destructive' : undefined} testId="tile-restarts">
         <Plot said={restartsSaid(snapshot)} count={restarted.length} kind="bar" height={layout.plot} tip={(i) => restartsTip(restarted[i] as (typeof restarted)[number])} testId="tile-restarts">
           {(active) =>
             restarted.length ? (
@@ -170,6 +180,8 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
         </Plot>
       </Tile>
       <Tile
+        layout={layout}
+        className="@min-[360px]:col-span-2 @min-[640px]:col-span-1"
         title="Disk"
         value={snapshot.disk.free === null ? '—' : `${sizeSaid(snapshot.disk.free)} free`}
         sub={worktrees.count ? `${worktrees.count} worktrees, ${worktrees.withModules} with node_modules` : snapshot.disk.total ? `of ${sizeSaid(snapshot.disk.total)}` : 'measuring'}
@@ -180,7 +192,8 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
           said={`${diskSaid(snapshot.disk)} ${segmentsSaid(segments)}`}
           count={segments.length}
           kind="ring"
-          height={layout.ring}
+          height={ringRow(layout, segments.length)}
+          ring={layout.ring}
           fractions={segments.map((one) => one.fraction)}
           tip={(i) => segmentTip(segments[i] as Segment)}
           testId="tile-disk"
@@ -195,7 +208,7 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
 
 const MARGIN = { top: 2, right: 0, bottom: 0, left: 0 }
 /* Room for the top tick's text above the plot and the last time's below it, so no axis is clipped. */
-const AXES_MARGIN = { top: 6, right: 2, bottom: 0, left: 0 }
+const AXES_MARGIN = { top: 6, right: 4, bottom: 0, left: 0 }
 
 /** The first time anchored at its start and the last at its end, so neither runs off the plot. */
 function EdgeTick({ x, y, payload, index, format }: { x?: number; y?: number; payload?: { value: number }; index?: number; format: (value: number) => string }) {
@@ -223,7 +236,7 @@ function AreaPlot<T extends { at: number }>({ data, dataKey, config, axes, activ
         <XAxis hide={!axes} dataKey="at" type="number" domain={[first, last]} ticks={[first, last]} interval={0} tickLine={false} axisLine={false} height={16} tick={<EdgeTick format={hm} />} />
         {on ? <ReferenceLine x={on.at} stroke="var(--muted-foreground)" strokeDasharray="2 2" /> : null}
         <Area dataKey={dataKey} type="monotone" stroke={`var(--color-${dataKey})`} fill={`var(--color-${dataKey})`} fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} />
-        {on ? <ReferenceDot x={on.at} y={Number(on[dataKey])} r={3} fill={`var(--color-${dataKey})`} stroke="var(--card)" /> : null}
+        {on ? <ReferenceDot x={on.at} y={Number(on[dataKey])} r={3} fill={`var(--color-${dataKey})`} stroke="var(--background)" /> : null}
       </AreaChart>
     </ChartContainer>
   )
@@ -253,7 +266,7 @@ function Doughnut({ segments, size, active }: { segments: readonly Segment[]; si
   return (
     <div className="relative size-full">
       <PieChart width={size} height={size} accessibilityLayer={false}>
-        <Pie data={segments as Segment[]} dataKey="bytes" nameKey="short" innerRadius={(size / 2) * HOLE} outerRadius={size / 2 - 1} startAngle={90} endAngle={-270} stroke="var(--card)" strokeWidth={1} isAnimationActive={false}>
+        <Pie data={segments as Segment[]} dataKey="bytes" nameKey="short" innerRadius={(size / 2) * HOLE} outerRadius={size / 2 - 1} startAngle={90} endAngle={-270} stroke="var(--background)" strokeWidth={1} isAnimationActive={false}>
           {segments.map((one, i) => (
             <Cell key={one.key} fill={DISK[one.key]} fillOpacity={active === null || active === i ? 1 : 0.4} />
           ))}
@@ -271,9 +284,9 @@ function Doughnut({ segments, size, active }: { segments: readonly Segment[]; si
 /** The doughnut in words: each consumer and its size. Beside it when the tile has room, for screen readers only when not. */
 function Segments({ segments, shown }: { segments: readonly Segment[]; shown: boolean }) {
   return (
-    <ul aria-label="What Kehikot takes on the disk" className={shown ? 'flex min-w-0 flex-1 flex-col gap-0.5 text-[11px] leading-tight tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
+    <ul aria-label="What Kehikot takes on the disk" className={shown ? 'flex min-w-0 flex-1 flex-col text-[11px] tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
       {segments.map((one) => (
-        <li key={one.key} className="flex min-w-0 items-center gap-1.5">
+        <li key={one.key} className="flex min-w-0 items-center gap-1.5" style={shown ? { height: LEGEND_ROW, lineHeight: `${LEGEND_ROW}px` } : undefined}>
           <span aria-hidden className="size-2 shrink-0 rounded-[2px]" style={{ background: DISK[one.key] }} />
           <span className="min-w-0 flex-1 truncate" title={one.label}>
             {one.label}
@@ -285,21 +298,33 @@ function Segments({ segments, shown }: { segments: readonly Segment[]; shown: bo
   )
 }
 
-/** A glance tile: its title and number in one row, a line in words, then its plot at a height of its own. Nothing overlays the plot but the tooltip. */
-function Tile({ title, value, sub, subTone, testId, children }: { title: string; value: string; sub: string; subTone?: string; testId: string; children: React.ReactNode }) {
+/**
+ * A glance tile, with no card of its own: tight padding, the page's background, a hairline between
+ * it and the next (the grid's gap). In one column (`compact`) its title, line in words and number are
+ * one row, the plot directly under it; side by side the words go on a line under the title. Nothing
+ * overlays the plot but the tooltip, which sits outside it.
+ */
+function Tile({ layout, className = '', title, value, sub, subTone, testId, children }: { layout: TileLayout; className?: string; title: string; value: string; sub: string; subTone?: string; testId: string; children: React.ReactNode }) {
+  const words = (
+    <p className={`min-w-0 truncate text-[11px] ${subTone ?? 'text-muted-foreground'} ${layout.compact ? 'flex-1' : ''}`} style={{ lineHeight: `${layout.compact ? HEAD_HEIGHT : SUB_HEIGHT}px` }} title={sub}>
+      {sub}
+    </p>
+  )
   return (
-    <section aria-label={title} className="bg-card flex min-w-0 flex-col gap-1 rounded-md border px-2 py-1.5" data-testid={testId}>
-      <div className="flex min-w-0 items-baseline justify-between gap-2" data-testid={`${testId}-head`}>
-        <h2 className="text-muted-foreground min-w-0 truncate text-[10px] font-medium tracking-wide uppercase" title={title}>
-          {title}
-        </h2>
+    <section
+      aria-label={title}
+      className={`bg-background flex min-w-0 flex-col ${className}`}
+      style={{ padding: `${PAD_Y}px ${PAD_X}px`, rowGap: ROW_GAP }}
+      data-testid={testId}
+    >
+      <div className="flex min-w-0 items-baseline justify-between gap-2" style={{ height: HEAD_HEIGHT, lineHeight: `${HEAD_HEIGHT}px` }} data-testid={`${testId}-head`}>
+        <h2 className="text-muted-foreground shrink-0 text-[10px] font-medium tracking-wide uppercase">{title}</h2>
+        {layout.compact ? words : null}
         <p className="min-w-0 truncate text-sm font-semibold tabular-nums" data-testid={`${testId}-value`} title={value}>
           {value}
         </p>
       </div>
-      <p className={`truncate text-xs ${subTone ?? 'text-muted-foreground'}`} title={sub}>
-        {sub}
-      </p>
+      {layout.compact ? null : words}
       {children}
     </section>
   )
