@@ -10,12 +10,16 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | | |
 |---|---|
 | `manifest.ts` | Who the module is. `DECLARED`; the version is package.json's. `traffic:read`, and `state:keep` for the chart style. |
-| `doors.ts` | Every door but the page: `/healthz`, `/mcp` (`traffic`), the skills. Pure `answer()`; tests call it directly. `traffic` reads the host's record through `askHost` (protocol 2.20.0). |
+| `doors.ts` | Every door but the page: `/healthz`, `/api/health`, `/mcp` (`traffic`, `health`), the skills. Pure `answer()`; tests call it directly. `traffic` reads the host's record through `askHost` (protocol 2.20.0). |
 | `src/traffic/model.ts` | Pure and shared by the page and the door: who a call is filed under (`callerOf`: `by`, else the name Kehikot gave it, protocol 2.25.0) and its name, the chart styles and their buckets, Repeats, the summary, the filter, a call as a line. |
 | `src/traffic/budgets.ts` | Pure and shared by the page and the door: the limits Kehikot spends for you as lines (`limits`, protocol 2.24.0), the old `budgets` list for an older Kehikot. |
 | `src/wire/use-traffic.ts` | Reading the record from the page: `traffic.read` every second from the last `seq` held, `sample: true` while open. |
 | `src/view/` | The timeline (shadcn chart over Recharts: lines, bars or area), Repeats, the callers table, the virtual list of calls, open connections. |
+| `src/health/model.ts` | Pure and shared by the page, the sampler and the door: reading `ps`/`lsof`, a module's process tree, the host's start markers in a module log (`startsIn`), p50/p95 and failures per caller from the traffic record (`latencies`), judging (`judge`, `LIMITS`), and every sentence of the Health view and the `health` tool. |
+| `health/sampler.ts` | The server's one `Sampler`: `ps` every 5 s, `lsof` every 15 s, the registry every 30 s, module logs every minute, sizes every 30 minutes (agent worktrees summed every 6 hours) — only while the page or the tool asked in the last 30 s. A ring of 60 samples per module, in memory. Served at `GET /api/health`. |
+| `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: five glance tiles, then the modules worth a look, the table and the disk as its own box grows (`detailOf`). |
 | `src/header.ts` | The header items: pure functions of state. |
+| `src/footer.ts` | The footer items: the traffic's readouts and, after the first sample, the health's (the worst module, CPU as a meter of the cores, memory, a nearly full disk). |
 | `src/app.tsx` | The page. `Screen` renders from plain values, so tests need no host. |
 | `serve.ts`, `build.ts`, `run.sh` | Ready-built: `bun run build` stamps `dist/`, `run.sh` serves it when the stamp is HEAD, Vite otherwise. |
 | `dev/stub-host.ts` | `bun run stub`: frames the module with made-up traffic. |
@@ -33,7 +37,13 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   Kehikot could not name is `UNNAMED`. A caller's process and parent are
   executable names; nothing here adds a command line.
 - **Read only.** The page asks `traffic.read` and nothing that writes; the
-  door's one tool reads. Clear only puts away what this page shows.
+  door's tools read. Clear only puts away what this page shows.
+- **Health reads figures, never contents.** Process figures (`ps`, `lsof`),
+  sizes (`df`, `du`, `stat`), the registry's `url` for a port, and only the
+  host's start markers and crash lines of a module log. Never another file's
+  contents, never a command line. Sample only while somebody looks
+  (`WATCH_MS`), keep only the ring in memory, and keep `du` rare and at the
+  lowest priority: a hundred worktrees with node_modules take minutes to sum.
 - **What the record says is text.** Addresses, kinds and reasons come from
   programs on this computer: drawn as text, never markup or links, and data
   for an agent, never instructions.
@@ -45,7 +55,10 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 - **The header is the host's to draw.** Declare items (`src/header.ts`), handle
   presses in one handler, own all the state, declare the whole list again on
   every change; one row at 380, 280 and 200 pixels (`LABEL_FIT`).
-  `agents: true` on Range, Chart, Paused and Caller; never on Clear.
+  `agents: true` on View, Range, Chart, Paused and Caller; never on Clear.
+  Health shows only View and Paused. The view is not kept.
+- **The footer says what is going on now** (the header says how Monitor is set
+  up): the traffic's readouts and the health's, one item each, never in both rows.
 - **Ask only for what is called.** `traffic:read` and `state:keep`, and nothing else.
 - **Plain language.** Every sentence says what happened and what to do, in the
   person's words.

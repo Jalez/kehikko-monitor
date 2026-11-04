@@ -1,7 +1,9 @@
 import { manifestSchema, type Manifest, type TrafficReadResult } from 'kehikot-module-protocol'
 import { askHost, establishBuild, mintTicket, type AskHostOptions, type Reply } from 'kehikot-module-protocol/serve'
 
+import { SAMPLER } from './health/sampler.ts'
 import { DECLARED, ID, VERSION } from './manifest.ts'
+import { HEALTH_VIEWS, healthSaid, latencies, type HealthView, type Snapshot } from './src/health/model.ts'
 import { budgetLines } from './src/traffic/budgets.ts'
 import { isSkillPath, skillAt, skillDeclarations, serveFrom } from './skills.ts'
 import { REPEAT_MIN, REPEAT_WINDOW_MS, bytesSaid, callLine, callerName, callerOf, filtered, repeats, spoken, summary, type Caller } from './src/traffic/model.ts'
@@ -40,12 +42,15 @@ export const ASK: { options: Pick<AskHostOptions, 'fetch' | 'env' | 'timeoutMs'>
 /** The clock, for the tests. */
 export const CLOCK = { now: () => Date.now() }
 
+/** Where the health of the processes comes from: the server's one sampler. The tests replace it. */
+export const HEALTH: { snapshot: () => Promise<Snapshot> } = { snapshot: () => SAMPLER.snapshot() }
+
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const bad = (why: string, status = 400): Reply => ({ status, body: { ok: false, error: why } })
 const plain = (text: string): Reply => ({ status: 200, body: null, raw: { bytes: text, type: 'text/markdown; charset=utf-8' } })
 
 /* ------------------------------------------------------------------ *
- * The MCP door, for agents: one read-only tool.
+ * The MCP door, for agents: two read-only tools, traffic and health.
  * ------------------------------------------------------------------ */
 
 export const VIEWS = ['repeats', 'summary', 'calls'] as const
@@ -71,7 +76,36 @@ export function tools() {
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
+    {
+      name: 'health',
+      description:
+        'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), how long its calls take (p50 and p95) and how many fail, how often it was started and whether it crashed, and what takes the most disk. '
+        + 'Use it to answer "why is the computer slow", "which module is heavy", "did something crash", "what is filling the disk". '
+        + '`now` (default): the worst first, the totals, the slowest calls, restarts and free disk. `processes`: every module by CPU and memory. `calls`: every caller by its slowest calls and failures. `restarts`: starts and crashes in the last 24 hours. `disk`: the biggest folders Kehikot and agents leave: its database, installed modules, logs and agent worktrees. '
+        + 'Read-only: it stops and changes nothing, and reads only process figures, sizes and the start lines of module logs.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          view: { type: 'string', enum: [...HEALTH_VIEWS], description: 'now, processes, calls, restarts or disk. Default: now.' },
+        },
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
   ]
+}
+
+/** Each module's port, from a snapshot: the calls made to it are the calls it answered. */
+export const portsOf = (snapshot: Snapshot): Map<string, number> => new Map(snapshot.modules.flatMap((one) => (one.port === null ? [] : [[one.id, one.port] as [string, number]])))
+
+async function health(args: Record<string, unknown>): Promise<string> {
+  const view: HealthView = typeof args.view === 'string' && (HEALTH_VIEWS as readonly string[]).includes(args.view) ? (args.view as HealthView) : 'now'
+  const snapshot = await HEALTH.snapshot()
+  const now = CLOCK.now()
+  /* The calls' times are the host's record; without it the rest still answers. */
+  const read = view === 'processes' || view === 'restarts' || view === 'disk' ? null : await askHost('traffic.read', { since: 0, limit: 5000 }, { module: ID, ...ASK.options })
+  const lat = read?.ok ? latencies(read.data.calls, now, portsOf(snapshot)) : []
+  const why = read && !read.ok ? `Monitor could not read Kehikot’s record of traffic, so call times are missing: ${read.why}` : ''
+  return healthSaid(snapshot, lat, now, view, why)
 }
 
 /** Who a `caller` argument names among the callers seen: an id, or a name. */
@@ -143,7 +177,8 @@ export function trafficSaid(read: TrafficReadResult, args: Record<string, unknow
 }
 
 async function call(name: string, args: Record<string, unknown>): Promise<string> {
-  if (name !== 'traffic') throw new Error(`There is no tool "${name.slice(0, 60)}" here. This door has traffic.`)
+  if (name === 'health') return health(args)
+  if (name !== 'traffic') throw new Error(`There is no tool "${name.slice(0, 60)}" here. This door has traffic and health.`)
   const read = await askHost('traffic.read', { since: 0, limit: 5000 }, { module: ID, ...ASK.options })
   if (!read.ok) {
     if (read.refused === 'pass' || read.refused === 'module') throw new Error(`Kehikot would not answer Monitor’s server: ${read.why}`)
@@ -204,6 +239,12 @@ export async function answer(
       return { status: 400, body: { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'not a request' } } }
     }
     return mcp(body as Rpc)
+  }
+
+  /* The processes' health, for the page: figures and sizes only. */
+  if (path === '/api/health') {
+    if (method !== 'GET') return bad('Health is read with GET.', 405)
+    return ok(await HEALTH.snapshot())
   }
 
   /* An unknown path under /api/ is ours to refuse, not Vite's to serve as a file. */

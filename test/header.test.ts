@@ -7,16 +7,29 @@ import { CALLERS_LISTED, EVERY, LABEL_FIT, callerOption, headerItems, keptStyle,
 const state = { range: 5 as const, style: 'lines' as const, paused: false, caller: null, callers: ['kehikko', 'kehikot.kanban', ''] }
 
 describe('the header', () => {
-  test('range, pause and caller for agents; Clear is the person’s', () => {
+  test('view, range, pause and caller for agents; Clear is the person’s', () => {
     const items = headerItems(state)
     expect(headerItemsSchema.safeParse(items).success).toBe(true)
     expect(items.map((item) => [item.id, item.kind, item.agents === true])).toEqual([
+      ['view', 'switch', true],
       ['range', 'switch', true],
       ['style', 'switch', true],
       ['pause', 'toggle', true],
       ['caller', 'switch', true],
       ['clear', 'run', false],
     ])
+  })
+
+  test('Health shows only the view and the pause: the timeline has nothing to set up there', () => {
+    const items = headerItems({ ...state, view: 'health' })
+    expect(items.map((item) => item.id)).toEqual(['view', 'pause'])
+    expect(items[0]).toMatchObject({ value: 'health' })
+  })
+
+  test('a press on View picks traffic or health, and nothing else', () => {
+    expect(pressed('view', 'health', [])).toEqual({ view: 'health' })
+    expect(pressed('view', 'traffic', [])).toEqual({ view: 'traffic' })
+    expect(typeof pressed('view', 'disk', [])).toBe('string')
   })
 
   test('every label reads in a narrow menu, however many callers', () => {

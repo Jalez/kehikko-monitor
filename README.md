@@ -16,9 +16,17 @@ again and again, so redundant polling stands out.
   to show who, why, where, the answer and whether it was free.
 - **Connections nobody reported.** What Kehikot sees open on its own processes
   and each module's, marked "no reason given".
-- **Header.** Range, Paused and Caller in View; Clear in Run (yours only).
+- **Health.** Choose View › Health: how much CPU and memory each module and
+  Kehikot use (sampled every 5 seconds), how long their calls take (p50 and
+  p95) and how many fail, how often each was started and whether it crashed,
+  and what takes the most disk — Kehikot's database, installed modules, logs
+  and agent worktrees. Five tiles at a glance, more as the container grows.
+- **Header and footer.** The header sets Monitor up: View, Range, Chart, Paused
+  and Caller. The footer says what is going on: live or paused, the rate,
+  repeats, a limit, the worst module, total CPU and memory, and Clear.
 - **Agents ask, you watch.** The `traffic` tool answers "what is polling too
-  much" from the same record; it reads only.
+  much" from the same record, and `health` answers "what is slow or heavy right
+  now"; both read only.
 
 Everything stays on this computer. Kehikot keeps the record in its own memory
 (the last 5,000 calls): addresses and reasons, never what a call carried — no
@@ -32,7 +40,11 @@ bodies, headers, tokens or query values.
 ## Data
 
 None. Monitor keeps nothing in a project and writes no file: it reads
-Kehikot's record of traffic (`traffic.read`, protocol 2.20.0).
+Kehikot's record of traffic (`traffic.read`, protocol 2.20.0), and for Health
+it reads process figures, folder sizes and the start lines of module logs —
+never what files hold. It samples only while its page is open or an agent
+asks, at about 1–2% of one core (the `ps` and `lsof` it runs included), and
+holds five minutes of samples in memory.
 
 ## Try it
 
