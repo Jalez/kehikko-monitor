@@ -81,7 +81,7 @@ export function tools() {
       description:
         'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), how long its calls take (p50 and p95) and how many fail, how often it was started and whether it crashed, and what takes the most disk. '
         + 'Use it to answer "why is the computer slow", "which module is heavy", "did something crash", "what is filling the disk". '
-        + '`now` (default): the worst first, the totals, the slowest calls, restarts and free disk. `processes`: every module by CPU and memory. `calls`: every caller by its slowest calls and failures. `restarts`: starts and crashes in the last 24 hours. `disk`: the biggest folders Kehikot and agents leave: its database, installed modules, logs and agent worktrees. '
+        + '`now` (default): the worst first, the totals, the slowest calls, restarts and free disk. `processes`: every module by CPU and memory. `calls`: every caller by its slowest calls and failures. `restarts`: starts in the last 24 hours, split into after an update, restarts by Kehikot or a person, and after a crash; only crashes, or three starts in 10 minutes nothing explains, are worth a look. `disk`: the biggest folders Kehikot and agents leave: its database, installed modules, logs and agent worktrees. '
         + 'Read-only: it stops and changes nothing, and reads only process figures, sizes and the start lines of module logs.',
       inputSchema: {
         type: 'object',

@@ -7,7 +7,7 @@ export function ring(now: number, cpu: number, rss: number, count = 6): Point[] 
 
 export function module(now: number, more: Partial<ModuleHealth> & { id: string }): ModuleHealth {
   const points = more.points ?? ring(now, 0.02, 80e6)
-  return { port: null, running: true, procs: 1, now: points.at(-1) ?? null, points, starts: 1, crashes: 0, startedAt: now - 3_600_000, crashedLately: false, ...more }
+  return { port: null, running: true, procs: 1, now: points.at(-1) ?? null, points, starts: 1, crashes: 0, updates: 0, startedAt: now - 3_600_000, crashedAt: [], unexplainedAt: [], ...more }
 }
 
 /** Kehikot, a busy Kanban, a Diff that crashed, a quiet Review and a stopped Notes. */
@@ -20,7 +20,7 @@ export function snapshotOf(now: number): Snapshot {
     modules: [
       module(now, { id: 'kehikko', port: 4170, points: ring(now, 0.1, 500e6), procs: 4 }),
       module(now, { id: 'kehikot.kanban', port: 4180, points: ring(now, 1.2, 300e6) }),
-      module(now, { id: 'kehikot.diff', port: 4190, starts: 3, crashes: 1, crashedLately: true }),
+      module(now, { id: 'kehikot.diff', port: 4190, starts: 3, crashes: 1, updates: 1, crashedAt: [now - 20 * 60_000] }),
       module(now, { id: 'kehikot.review', port: 4200 }),
       module(now, { id: 'kehikot.notes', port: 4210, starts: 0, running: false, procs: 0, points: [], now: null }),
     ],

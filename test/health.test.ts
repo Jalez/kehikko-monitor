@@ -8,12 +8,15 @@ import { footerItemsSchema } from 'kehikot-module-protocol'
 import { EVERY_MS, Sampler, hostPorts, parseDf, parseDu, registered, worktreeRoots, type Deps } from '../health/sampler.ts'
 import { footerItems } from '../src/footer.ts'
 import {
+  BUILD_MARK,
   RUN_MARK,
   cpuSeconds,
   detailOf,
   healthSaid,
+  judge,
   judged,
   latencies,
+  mostWithin,
   parseListeners,
   parsePs,
   percentile,
@@ -21,9 +24,12 @@ import {
   totals,
   totalsOver,
   treeOf,
+  unexplained,
+  type ModuleHealth,
+  type Starts,
 } from '../src/health/model.ts'
 import { call } from './fixtures.ts'
-import { snapshotOf } from './health-fixtures.ts'
+import { module, snapshotOf } from './health-fixtures.ts'
 
 const NOW = 2_000_000_000_000
 
@@ -80,6 +86,97 @@ describe('restarts from the host’s start markers', () => {
   test('a crash after the last start is dated when the log was last written', () => {
     const said = startsIn([mark('2026-11-01T10:00:00.000Z'), 'Segmentation fault'].join('\n'), 123)
     expect(said.crashes).toEqual([123])
+  })
+})
+
+/*
+ * Module logs as the host writes them (`openRun` in moduleLog.ts, `runBuild` in moduleBuilds.ts):
+ * a day with many updates and app restarts, and one with a module that keeps crashing.
+ */
+describe('worth a look: crashes, not updates or restarts', () => {
+  const T0 = Date.parse('2026-11-04T09:00:00.000Z')
+  const iso = (min: number) => new Date(T0 + min * 60_000).toISOString()
+  const start = (min: number) => `${RUN_MARK}${iso(min)} ---`
+  const build = (min: number, lines: string[] = ['vite v6 building for production...', '✓ built in 1.4s', 'built 65e3813 into /x/dist'], ok = true) => [
+    `${BUILD_MARK}${iso(min)} (/x) ---`,
+    ...lines,
+    `--- the build ${ok ? 'finished' : 'did not finish'} after 2.1s ---`,
+  ]
+  const served = ['kehikot.claude serves its built page on http://127.0.0.1:9030/app (65e3813)']
+  const at = (min: number) => T0 + min * 60_000
+
+  /* Claude: started 9 times today. Updated five times (twice within ten minutes), started with the app four times. */
+  const claudeLog = [
+    start(0), ...served,
+    ...build(30), start(31), ...served,
+    ...build(36), start(37), ...served,
+    ...build(40), start(41), ...served,
+    start(120), ...served,
+    start(125), ...served,
+    start(128), ...served,
+    ...build(200, ['error: script "build" exited with code 1'], false), start(202), ...served,
+    ...build(300), start(301), ...served,
+  ].join('\n')
+  /* Two other modules the app started at the same moments as Claude's plain starts. */
+  const otherLog = (id: string) => [0, 120, 125, 128].flatMap((min) => [start(min), `${id} serves its built page`]).join('\n')
+  /* Diff: a run that exits with code 1, three times in ten minutes. */
+  const diffLog = [
+    start(400), 'diff: listening', 'error: script "dev" exited with code 1',
+    start(403), 'diff: listening', 'Bun has crashed. This indicates a bug in Bun, not your code.',
+    start(406), 'diff: listening', 'error: script "dev" exited with code 1',
+    start(409), 'diff: listening',
+  ].join('\n')
+
+  const healthOf = (id: string, log: Starts, others: Starts[], now: number): ModuleHealth =>
+    module(now, { id, starts: log.starts.length, crashes: log.crashes.length, updates: log.updates.length, crashedAt: log.crashes, unexplainedAt: unexplained(log, others), startedAt: log.starts.at(-1) ?? null })
+
+  test('a start after a build is an update; what a build prints is never a crash', () => {
+    const claude = startsIn(claudeLog)
+    expect(claude.starts).toHaveLength(9)
+    expect(claude.updates).toEqual([31, 37, 41, 202, 301].map(at))
+    expect(claude.crashes).toEqual([])
+  })
+
+  test('starts alongside other modules’ starts are Kehikot’s; lone ones without a reason are left', () => {
+    const others = [startsIn(otherLog('kehikot.paper')), startsIn(otherLog('kehikot.flows'))]
+    expect(unexplained(startsIn(claudeLog), others)).toEqual([])
+    /* Alone, the app's three starts within ten minutes are unexplained. */
+    expect(unexplained(startsIn(claudeLog), [])).toEqual([0, 120, 125, 128].map(at))
+    expect(unexplained(startsIn(claudeLog), others.slice(0, 1))).toEqual([0, 120, 125, 128].map(at))
+  })
+
+  test('nine starts from updates and app restarts are not worth a look', () => {
+    const now = at(130)
+    const others = [startsIn(otherLog('kehikot.paper')), startsIn(otherLog('kehikot.flows'))]
+    const claude = judge(healthOf('kehikot.claude', startsIn(claudeLog), others, now), undefined, now)
+    expect(claude.level).toBe('normal')
+    expect(claude.said).not.toContain('started')
+  })
+
+  test('three crashes in ten minutes are worth a look, said in words', () => {
+    const now = at(410)
+    const diff = startsIn(diffLog)
+    expect(diff.crashes).toEqual([403, 406, 409].map(at))
+    expect(judge(healthOf('kehikot.diff', diff, [], now), undefined, now)).toMatchObject({ level: 'critical', said: 'crashed 3 times in 10 min' })
+    /* One crash is still a crash; an hour later it is not news. */
+    const once = startsIn([start(400), 'error: script "dev" exited with code 1', start(401)].join('\n'))
+    expect(judge(healthOf('kehikot.diff', once, [], at(420)), undefined, at(420)).said).toBe('crashed in the last hour')
+    expect(judge(healthOf('kehikot.diff', once, [], at(470)), undefined, at(470)).level).toBe('normal')
+  })
+
+  test('three starts in ten minutes that nothing explains are worth a word, without a crash’s weight', () => {
+    const now = at(130)
+    const lone = startsIn([0, 120, 125, 128].map(start).join('\n'))
+    expect(judge(healthOf('kehikot.notes', lone, [], now), undefined, now)).toMatchObject({ level: 'warn', said: 'started 3 times in 10 min, no update or crash in its log' })
+    /* Two are not a burst. */
+    const two = startsIn([0, 120, 125].map(start).join('\n'))
+    expect(judge(healthOf('kehikot.notes', two, [], now), undefined, now).level).toBe('normal')
+  })
+
+  test('the most in any window', () => {
+    expect(mostWithin([0, 5, 9, 11, 30], 10)).toBe(3)
+    expect(mostWithin([0, 5, 9, 11, 30], 10, 6)).toBe(2)
+    expect(mostWithin([], 10)).toBe(0)
   })
 })
 

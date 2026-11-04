@@ -48,7 +48,7 @@ export function healthItems(health: FooterState['health']): unknown[] {
       id: 'worst',
       text: cut(text, LIMITS.FOOTER_TEXT),
       level: worst.level,
-      tooltip: cut(worst.level === 'normal' ? `Nothing is slow or heavy. The busiest is ${worst.name}: ${worst.said}.` : `The worst right now. ${worst.name}: ${worst.said}.`, LIMITS.FOOTER_TOOLTIP),
+      tooltip: cut(worst.level === 'normal' ? `Nothing needs a look. The busiest is ${worst.name}: ${worst.said}.` : `The worst right now. ${worst.name}: ${worst.said}.`, LIMITS.FOOTER_TOOLTIP),
     })
   }
   const sum = totals(snapshot)

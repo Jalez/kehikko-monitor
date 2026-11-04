@@ -8,7 +8,7 @@ import { HealthView } from '../src/view/health.tsx'
 import type { Host } from '../src/wire/use-kehikot.ts'
 import { readHealth } from '../src/wire/use-health.ts'
 import { call } from './fixtures.ts'
-import { snapshotOf } from './health-fixtures.ts'
+import { module, snapshotOf } from './health-fixtures.ts'
 
 afterEach(cleanup)
 
@@ -43,6 +43,32 @@ describe('the Health view', () => {
     expect(screen.getByText('1 more registered modules are not running.')).toBeTruthy()
     expect(screen.getByTestId('disk').textContent).toContain('40 worktrees, 30 with node_modules')
     expect(screen.getByTestId('self').textContent).toContain('only while this page or an agent is looking')
+  })
+
+  test('a day of updates and restarts: one quiet line, and the Restarts tile splits them without a warning colour', () => {
+    const snapshot = snapshotOf(NOW)
+    /* Claude started nine times today, all of them updates or Kehikot starting it; nothing crashed, nothing is busy. */
+    snapshot.modules = [
+      module(NOW, { id: 'kehikko', port: 4170 }),
+      module(NOW, { id: 'kehikot.claude', port: 9030, starts: 9, updates: 5 }),
+      module(NOW, { id: 'kehikot.paper', port: 9040, starts: 4, updates: 1 }),
+    ]
+    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[]} problem={null} now={NOW} />)
+    expect(screen.getByTestId('flagged').textContent).toBe('Nothing needs a look.')
+    expect(screen.queryByText('Worth a look')).toBeNull()
+    expect(screen.getByTestId('tile-restarts-value').textContent).toBe('14 today')
+    const tile = screen.getByRole('region', { name: 'Restarts' })
+    expect(tile.textContent).toContain('6 updates, 8 restarts, no crash')
+    expect(tile.innerHTML).not.toContain('destructive')
+    expect(tile.innerHTML).not.toContain('amber')
+  })
+
+  test('a crash still shows in the Restarts tile as a count, in words, not in red', () => {
+    const snapshot = snapshotOf(NOW)
+    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[]} problem={null} now={NOW} />)
+    const tile = screen.getByRole('region', { name: 'Restarts' })
+    expect(tile.textContent).toContain('1 update, 4 restarts, 1 crash')
+    expect(tile.innerHTML).not.toContain('destructive')
   })
 
   test('before the first sample, a sentence', () => {

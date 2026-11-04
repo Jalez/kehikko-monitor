@@ -92,34 +92,93 @@ const CRASHED = /Bun has crashed|panic\(|exited with code (?!0\b|143\b|130\b)\d+
 /** A build that failed (at install or update) is not a run that crashed. */
 const BUILD = /script "build"|\bbuild\b.*exited/
 
+/**
+ * The host builds an installed module when it installs or updates it (`runBuild` in the host's
+ * moduleBuilds.ts) and writes the build's output between these two lines. A start after one is a
+ * start after an update, and nothing printed in between is a crash of the module.
+ */
+export const BUILD_MARK = '--- kehikko built this at '
+const BUILD_END = /^--- the build (finished|did not finish) after /
+
 export interface Starts {
   /** Every start in the log, ms since the epoch, oldest first. */
   starts: number[]
   /** Starts whose run before them ended in a crash: the time of the start that followed the crash. */
   crashes: number[]
+  /** Starts with a build of the module (an install or an update) since the start before. */
+  updates: number[]
 }
 
 /**
- * The starts and crashes one log says. Only the marker lines and the crash patterns are looked at;
- * nothing else of the log is kept or said.
+ * The starts and crashes one log says. Only the host's marker lines and the crash patterns are
+ * looked at; nothing else of the log is kept or said.
  */
 export function startsIn(log: string, endedAt: number = Number.MAX_SAFE_INTEGER): Starts {
   const starts: number[] = []
   const crashes: number[] = []
+  const updates: number[] = []
   let crashed = false
+  let built = false
+  let building = false
   for (const line of log.split('\n')) {
     if (line.startsWith(RUN_MARK)) {
       const at = Date.parse(line.slice(RUN_MARK.length).replace(/\s*-+\s*$/, ''))
       if (Number.isFinite(at)) {
         if (crashed && starts.length) crashes.push(at)
+        else if (built) updates.push(at)
         starts.push(at)
       }
       crashed = false
-    } else if (!crashed && CRASHED.test(line) && !BUILD.test(line)) crashed = true
+      built = false
+      building = false
+    } else if (line.startsWith(BUILD_MARK)) {
+      built = true
+      building = true
+    } else if (BUILD_END.test(line)) building = false
+    else if (!building && !crashed && CRASHED.test(line) && !BUILD.test(line)) crashed = true
   }
   /* A crash after the last start, with no start since: the module is down after crashing, since the log was last written (`endedAt`). */
   if (crashed && starts.length) crashes.push(endedAt)
-  return { starts, crashes }
+  return { starts, crashes, updates }
+}
+
+/** Starts of several modules this close together are Kehikot starting them: the app or the host starting. */
+export const TOGETHER_MS = 90_000
+/** How many other modules must start that close for a start to be Kehikot's. */
+export const TOGETHER_OTHERS = 2
+/** Repeated starts are worth a look when this many fall in `BURST_MS`. */
+export const BURST_MIN = 3
+export const BURST_MS = 10 * 60_000
+
+/**
+ * The starts one log gives no reason for: not after a crash, not after an update, and not while
+ * other modules started too (Kehikot or the app starting, or restarting to update). What is left
+ * is a person's restart, Kehikot starting it for an open kehikko, or a process that ended without
+ * saying why; only a burst of them is worth a look.
+ */
+export function unexplained(own: Starts, others: readonly Starts[]): number[] {
+  const explained = new Set([...own.crashes, ...own.updates])
+  return own.starts.filter((at) => {
+    if (explained.has(at)) return false
+    let together = 0
+    for (const other of others) {
+      if (other.starts.some((then) => Math.abs(then - at) <= TOGETHER_MS)) together++
+      if (together >= TOGETHER_OTHERS) return false
+    }
+    return true
+  })
+}
+
+/** The most of `times` (oldest first or not) inside any window of `windowMs`, counting only those at or after `since`. */
+export function mostWithin(times: readonly number[], windowMs: number, since = 0): number {
+  const sorted = times.filter((at) => at >= since).sort((a, b) => a - b)
+  let most = 0
+  let from = 0
+  for (let to = 0; to < sorted.length; to++) {
+    while ((sorted[to] as number) - (sorted[from] as number) > windowMs) from++
+    most = Math.max(most, to - from + 1)
+  }
+  return most
 }
 
 /* ------------------------------------------------------------------ *
@@ -146,14 +205,18 @@ export interface ModuleHealth {
   now: Point | null
   /** The ring of samples, oldest first. */
   points: Point[]
-  /** Starts in the last 24 hours, from its log. */
+  /** Starts in the last 24 hours, from its log: every kind. */
   starts: number
-  /** Crashes in the last 24 hours, and whether the latest run ended in one. */
+  /** Of those, the starts after a crash. */
   crashes: number
+  /** Of those, the starts after Kehikot built it: an install or an update. */
+  updates: number
   /** The last start the log says, ms; null when there is no log. */
   startedAt: number | null
-  /** A crash happened in the last hour. */
-  crashedLately: boolean
+  /** When it crashed in the last 24 hours, oldest first. */
+  crashedAt: number[]
+  /** Starts in the last 24 hours its log gives no reason for (`unexplained`), oldest first. */
+  unexplainedAt: number[]
 }
 
 export interface DiskUse {
@@ -278,10 +341,11 @@ export const LIMITS = {
   p95Critical: 10_000,
   errorWarn: 0.2,
   errorMin: 5,
-  startsWarn: 5,
   freeWarn: 0.1,
   freeCritical: 0.05,
 } as const
+
+const HOUR = 60 * 60_000
 
 export const average = (points: readonly Point[]): number => (points.length ? points.reduce((sum, point) => sum + point.cpu, 0) / points.length : 0)
 
@@ -306,7 +370,13 @@ export function judge(module: ModuleHealth, latency: CallerLatency | undefined, 
   const cpu = average(module.points.slice(-6))
   const rss = module.now?.rss ?? 0
   const found: Array<{ level: Level; said: string }> = []
-  if (module.crashedLately) found.push({ level: 'critical', said: module.running ? 'crashed in the last hour' : 'down after a crash' })
+  const lately = now - HOUR
+  const crashed = module.crashedAt.filter((at) => at >= lately).length
+  if (crashed) {
+    const burst = mostWithin(module.crashedAt, BURST_MS, lately)
+    const said = !module.running ? 'down after a crash' : burst >= BURST_MIN ? `crashed ${burst} times in ${spoken(BURST_MS)}` : crashed > 1 ? `crashed ${crashed} times in the last hour` : 'crashed in the last hour'
+    found.push({ level: 'critical', said })
+  }
   if (cpu >= LIMITS.cpuCritical) found.push({ level: 'critical', said: `${percent(cpu)} CPU` })
   else if (cpu >= LIMITS.cpuWarn) found.push({ level: 'warn', said: `${percent(cpu)} CPU` })
   if (rss >= LIMITS.rssCritical) found.push({ level: 'critical', said: `${sizeSaid(rss)} memory` })
@@ -320,7 +390,9 @@ export function judge(module: ModuleHealth, latency: CallerLatency | undefined, 
       break
     }
   }
-  if (module.starts >= LIMITS.startsWarn) found.push({ level: 'warn', said: `started ${module.starts} times today` })
+  /* Starts after an update, a restart or Kehikot starting are not news; only a burst nothing explains is. */
+  const odd = mostWithin(module.unexplainedAt, BURST_MS, lately)
+  if (odd >= BURST_MIN) found.push({ level: 'warn', said: `started ${odd} times in ${spoken(BURST_MS)}, no update or crash in its log` })
   const worst = found.find((one) => one.level === 'critical') ?? found[0]
   if (worst) return { id: module.id, name, level: worst.level, said: worst.said, cpu }
   return { id: module.id, name, level: 'normal', said: module.running ? `${percent(cpu)} CPU, ${sizeSaid(rss)}` : 'not running', cpu }
@@ -378,12 +450,25 @@ export function memorySaid(snapshot: Snapshot): string {
   return `They hold ${sizeSaid(sum.rss)} of memory${snapshot.memory ? `, ${percent(sum.rss / snapshot.memory)} of this computer's ${sizeSaid(snapshot.memory)}` : ''}.`
 }
 
+/** A day's starts, split by why: after an update, after a crash, and the rest (restarts by Kehikot or a person). */
+export function restartsOf(modules: readonly Pick<ModuleHealth, 'starts' | 'crashes' | 'updates'>[]): { starts: number; updates: number; crashes: number; restarts: number } {
+  const starts = modules.reduce((sum, m) => sum + m.starts, 0)
+  const updates = modules.reduce((sum, m) => sum + m.updates, 0)
+  const crashes = modules.reduce((sum, m) => sum + m.crashes, 0)
+  return { starts, updates, crashes, restarts: Math.max(0, starts - updates - crashes) }
+}
+
+const counted = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** "3 updates, 5 restarts, no crash": a day's starts by why. */
+export const whySaid = (sum: { updates: number; restarts: number; crashes: number }): string =>
+  `${counted(sum.updates, 'update')}, ${counted(sum.restarts, 'restart')}, ${sum.crashes ? counted(sum.crashes, 'crash', 'crashes') : 'no crash'}`
+
 export function restartsSaid(snapshot: Snapshot): string {
-  const starts = snapshot.modules.reduce((sum, module) => sum + module.starts, 0)
-  const crashes = snapshot.modules.reduce((sum, module) => sum + module.crashes, 0)
+  const sum = restartsOf(snapshot.modules)
   const most = [...snapshot.modules].sort((a, b) => b.starts - a.starts)[0]
-  if (!starts) return 'No module was started in the last 24 hours.'
-  return `${starts} starts in the last 24 hours, ${crashes ? `${crashes} after a crash` : 'none after a crash'}${most && most.starts > 1 ? `; ${nameOf(most.id)} the most, ${most.starts} times` : ''}.`
+  if (!sum.starts) return 'No module was started in the last 24 hours.'
+  return `${sum.starts} starts in the last 24 hours: ${sum.updates} after an update, ${sum.restarts} restarts by Kehikot or a person, ${sum.crashes ? `${sum.crashes} after a crash` : 'none after a crash'}${most && most.starts > 1 ? `; ${nameOf(most.id)} the most, ${most.starts} times` : ''}.`
 }
 
 export function diskSaid(disk: Disk): string {
@@ -441,7 +526,7 @@ export function healthSaid(snapshot: Snapshot, lat: readonly CallerLatency[], no
   if (view === 'now') {
     lines.push(`${cpuSaid(snapshot)} ${memorySaid(snapshot)}`)
     const flagged = all.filter((one) => one.level !== 'normal')
-    lines.push('', flagged.length ? 'Worth a look, the worst first:' : 'Nothing is slow or heavy right now. The busiest:')
+    lines.push('', flagged.length ? 'Worth a look, the worst first:' : 'Nothing needs a look right now. The busiest:')
     lines.push(...(flagged.length ? flagged : all.filter((one) => byId.get(one.id)?.running).slice(0, 5)).map((one) => `- ${one.name}: ${one.said}${one.level === 'critical' ? ' (critical)' : one.level === 'warn' ? ' (warning)' : ''}`))
     lines.push('', trafficWhy || latencySaid(lat), restartsSaid(snapshot), `Disk: ${snapshot.disk.at === null ? 'being measured.' : diskSaid(snapshot.disk)}`)
   }
@@ -467,7 +552,7 @@ export function healthSaid(snapshot: Snapshot, lat: readonly CallerLatency[], no
     const ordered = [...snapshot.modules].filter((m) => m.id !== TRAFFIC_HOST_BY).sort((a, b) => b.crashes - a.crashes || b.starts - a.starts)
     lines.push(
       ...ordered.map(
-        (m) => `- ${nameOf(m.id)}: ${m.starts} starts today, ${m.crashes} after a crash${m.startedAt ? `, last started ${agoSaid(m.startedAt, now)}` : ', no log'}${m.running ? '' : ', not running'}`,
+        (m) => `- ${nameOf(m.id)}: ${m.starts} starts today (${whySaid({ updates: m.updates, crashes: m.crashes, restarts: Math.max(0, m.starts - m.updates - m.crashes) })})${m.startedAt ? `, last started ${agoSaid(m.startedAt, now)}` : ', no log'}${m.running ? '' : ', not running'}`,
       ),
     )
   }

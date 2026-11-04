@@ -14,10 +14,12 @@ import {
   msSaid,
   nameOf,
   percent,
+  restartsOf,
   restartsSaid,
   sizeSaid,
   totals,
   totalsOver,
+  whySaid,
   worktreesOf,
   type CallerLatency,
   type Judged,
@@ -94,7 +96,6 @@ export function HealthView({ snapshot, judged, latencies, problem, now, box: giv
 
 function Shown({ snapshot, judged, latencies, problem, now, detail, width }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null }) {
   const flagged = judged.filter((one) => one.level !== 'normal')
-  const running = snapshot.modules.filter((m) => m.running)
   return (
     <>
       {problem || snapshot.why ? (
@@ -104,22 +105,28 @@ function Shown({ snapshot, judged, latencies, problem, now, detail, width }: { s
       ) : null}
       <Tiles snapshot={snapshot} latencies={latencies} width={width} />
       {detail !== 'glance' ? (
-        <section aria-labelledby="flagged-title" className="flex min-w-0 flex-col gap-1">
-          <h2 id="flagged-title" className="text-sm font-medium">
-            {flagged.length ? 'Worth a look' : 'Nothing is slow or heavy'}
-          </h2>
-          <ul className="flex flex-col gap-0.5 text-xs" data-testid="flagged">
-            {(flagged.length ? flagged : judged.filter((one) => running.some((m) => m.id === one.id)).slice(0, 3)).map((one) => (
-              <li key={one.id} className="flex gap-1.5">
-                <span className="font-medium">{one.name}</span>
-                <span className={LEVEL_TONE[one.level]}>
-                  {one.said}
-                  {one.level !== 'normal' ? ` (${LEVEL_SAID[one.level]})` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        flagged.length ? (
+          <section aria-labelledby="flagged-title" className="flex min-w-0 flex-col gap-1">
+            <h2 id="flagged-title" className="text-sm font-medium">
+              Worth a look
+            </h2>
+            <ul className="flex flex-col gap-0.5 text-xs" data-testid="flagged">
+              {flagged.map((one) => (
+                <li key={one.id} className="flex gap-1.5">
+                  <span className="font-medium">{one.name}</span>
+                  <span className={LEVEL_TONE[one.level]}>
+                    {one.said} ({LEVEL_SAID[one.level]})
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : (
+          /* Nothing qualifies: one quiet line, never a list of what is fine. */
+          <p className="text-muted-foreground text-xs" data-testid="flagged">
+            Nothing needs a look.
+          </p>
+        )
       ) : null}
       {detail === 'full' ? <Modules snapshot={snapshot} judged={judged} latencies={latencies} now={now} /> : null}
       {detail === 'full' ? <DiskList snapshot={snapshot} now={now} /> : null}
@@ -139,9 +146,8 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
   const slow = latencies.filter((one) => one.p95 !== null).slice(0, 8).map((one) => ({ name: nameOf(one.by), by: one.by, p95: one.p95 as number, p50: one.p50, calls: one.calls, errors: one.errors }))
   const errors = latencies.reduce((n, one) => n + one.errors, 0)
   const calls = latencies.reduce((n, one) => n + one.calls, 0)
-  const restarted = [...snapshot.modules].filter((m) => m.starts).sort((a, b) => b.starts - a.starts).slice(0, 8).map((m) => ({ name: nameOf(m.id), id: m.id, starts: m.starts, crashes: m.crashes }))
-  const starts = snapshot.modules.reduce((n, m) => n + m.starts, 0)
-  const crashes = snapshot.modules.reduce((n, m) => n + m.crashes, 0)
+  const restarted = [...snapshot.modules].filter((m) => m.starts).sort((a, b) => b.starts - a.starts).slice(0, 8).map((m) => ({ name: nameOf(m.id), id: m.id, starts: m.starts, crashes: m.crashes, updates: m.updates }))
+  const day = restartsOf(snapshot.modules)
   const segments = diskSegments(snapshot.disk)
   const worktrees = worktreesOf(snapshot.disk)
   const disk = diskLevel(snapshot.disk)
@@ -170,11 +176,12 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
           {(active) => (slow.length ? <Bars data={slow} dataKey="p95" config={CALLS} axes={layout.axes} active={active} format={(v) => msSaid(v)} /> : null)}
         </Plot>
       </Tile>
-      <Tile layout={layout} title="Restarts" value={`${starts} today`} sub={crashes ? `${crashes} after a crash` : 'no crash'} subTone={crashes ? 'text-destructive' : undefined} testId="tile-restarts">
+      {/* Information, not an alarm: a crash worth a look is said under Worth a look, so no warning colour here. */}
+      <Tile layout={layout} title="Restarts" value={`${day.starts} today`} sub={whySaid(day)} testId="tile-restarts">
         <Plot said={restartsSaid(snapshot)} count={restarted.length} kind="bar" height={layout.plot} tip={(i) => restartsTip(restarted[i] as (typeof restarted)[number])} testId="tile-restarts">
           {(active) =>
             restarted.length ? (
-              <Bars data={restarted} dataKey="starts" config={STARTS} axes={layout.axes} active={active} format={(v) => String(v)} fill={(one) => (one.crashes ? 'var(--destructive)' : 'var(--color-starts)')} />
+              <Bars data={restarted} dataKey="starts" config={STARTS} axes={layout.axes} active={active} format={(v) => String(v)} />
             ) : null
           }
         </Plot>
