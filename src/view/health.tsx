@@ -1,7 +1,7 @@
 import { useRef } from 'react'
-import { Area, AreaChart, Bar, BarChart, Cell, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
+import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
 import {
   agoSaid,
   average,
@@ -22,8 +22,25 @@ import {
   type CallerLatency,
   type Judged,
   type Level,
+  type Box,
   type Snapshot,
 } from '@/health/model'
+import { Plot } from '@/view/plot'
+import {
+  callsTip,
+  centreLabel,
+  cpuTip,
+  diskSegments,
+  HOLE,
+  memoryTip,
+  niceTop,
+  restartsTip,
+  segmentsSaid,
+  segmentTip,
+  tileLayout,
+  type Segment,
+  type SegmentKey,
+} from '@/view/tiles'
 import { useBox } from '@/view/use-box'
 
 /**
@@ -40,31 +57,34 @@ const CPU: ChartConfig = { cpu: { label: 'CPU (cores)', color: 'var(--series-1)'
 const MEMORY: ChartConfig = { gb: { label: 'Memory (GB)', color: 'var(--series-3)' } }
 const CALLS: ChartConfig = { p95: { label: 'p95 (ms)', color: 'var(--series-2)' } }
 const STARTS: ChartConfig = { starts: { label: 'Starts today', color: 'var(--series-7)' } }
-const DISK: ChartConfig = { gb: { label: 'Size (GB)', color: 'var(--series-4)' } }
+/* One colour per consumer of the disk, never by order: a segment keeps its colour as sizes change. */
+const DISK: Record<SegmentKey, string> = { worktrees: 'var(--series-4)', modules: 'var(--series-1)', frame: 'var(--series-3)', logs: 'var(--series-5)', other: 'var(--series-other)' }
 
 const LEVEL_TONE: Record<Level, string> = { normal: 'text-muted-foreground', warn: 'text-amber-700 dark:text-amber-400', critical: 'text-destructive' }
 const LEVEL_SAID: Record<Level, string> = { normal: '', warn: 'warning', critical: 'critical' }
 
-const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
-export function HealthView({ snapshot, judged, latencies, problem, now }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; problem: string | null; now: number }) {
+export function HealthView({ snapshot, judged, latencies, problem, now, box: given }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; problem: string | null; now: number; box?: Box }) {
   const box = useRef<HTMLDivElement>(null)
-  const detail = detailOf(useBox(box))
+  const measured = useBox(box)
+  const size = given ?? measured
+  const detail = detailOf(size)
   return (
     /* One box, measured from the first render: what is inside changes, the box does not. */
-    <div ref={box} className="@container flex min-h-0 flex-1 flex-col gap-3" data-testid="health" data-detail={detail}>
+    <div ref={box} className="@container flex min-h-0 min-w-0 flex-1 flex-col gap-3" data-testid="health" data-detail={detail}>
       {!snapshot.at ? (
         <p className="text-muted-foreground rounded-md border p-3 text-xs" role="status">
           {problem ?? (snapshot.why || 'Looking at the processes… the first figures come in a few seconds.')}
         </p>
       ) : (
-        <Shown snapshot={snapshot} judged={judged} latencies={latencies} problem={problem} now={now} detail={detail} />
+        <Shown snapshot={snapshot} judged={judged} latencies={latencies} problem={problem} now={now} detail={detail} width={size?.width ?? null} />
       )}
     </div>
   )
 }
 
-function Shown({ snapshot, judged, latencies, problem, now, detail }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf> }) {
+function Shown({ snapshot, judged, latencies, problem, now, detail, width }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null }) {
   const flagged = judged.filter((one) => one.level !== 'normal')
   const running = snapshot.modules.filter((m) => m.running)
   return (
@@ -74,7 +94,7 @@ function Shown({ snapshot, judged, latencies, problem, now, detail }: { snapshot
           {problem ?? snapshot.why}
         </p>
       ) : null}
-      <Tiles snapshot={snapshot} latencies={latencies} />
+      <Tiles snapshot={snapshot} latencies={latencies} width={width} />
       {detail !== 'glance' ? (
         <section aria-labelledby="flagged-title" className="flex min-w-0 flex-col gap-1">
           <h2 id="flagged-title" className="text-sm font-medium">
@@ -104,110 +124,183 @@ function Shown({ snapshot, judged, latencies, problem, now, detail }: { snapshot
   )
 }
 
-function Tiles({ snapshot, latencies }: { snapshot: Snapshot; latencies: readonly CallerLatency[] }) {
+function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: readonly CallerLatency[]; width: number | null }) {
+  const layout = tileLayout(width)
   const sum = totals(snapshot)
-  const over = totalsOver(snapshot).map((one) => ({ at: one.at, cpu: Math.round(one.cpu * 100) / 100, gb: Math.round((one.rss / 1e9) * 100) / 100 }))
-  const slow = latencies.filter((one) => one.p95 !== null).slice(0, 8).map((one) => ({ name: nameOf(one.by), p95: one.p95 as number }))
+  const over = totalsOver(snapshot).map((one) => ({ at: one.at, cpu: Math.round(one.cpu * 100) / 100, rss: one.rss, gb: Math.round((one.rss / 1e9) * 100) / 100 }))
+  const slow = latencies.filter((one) => one.p95 !== null).slice(0, 8).map((one) => ({ name: nameOf(one.by), by: one.by, p95: one.p95 as number, p50: one.p50, calls: one.calls, errors: one.errors }))
   const errors = latencies.reduce((n, one) => n + one.errors, 0)
   const calls = latencies.reduce((n, one) => n + one.calls, 0)
-  const restarted = [...snapshot.modules].filter((m) => m.starts).sort((a, b) => b.starts - a.starts).slice(0, 8).map((m) => ({ name: nameOf(m.id), starts: m.starts, crashed: m.crashes > 0 }))
+  const restarted = [...snapshot.modules].filter((m) => m.starts).sort((a, b) => b.starts - a.starts).slice(0, 8).map((m) => ({ name: nameOf(m.id), id: m.id, starts: m.starts, crashes: m.crashes }))
   const starts = snapshot.modules.reduce((n, m) => n + m.starts, 0)
   const crashes = snapshot.modules.reduce((n, m) => n + m.crashes, 0)
-  const uses = snapshot.disk.uses.filter((use) => use.bytes > 0).slice(0, 6).map((use) => ({ name: use.label, gb: Math.round((use.bytes / 1e9) * 10) / 10 }))
+  const segments = diskSegments(snapshot.disk)
   const worktrees = worktreesOf(snapshot.disk)
   const disk = diskLevel(snapshot.disk)
   return (
-    <div className="grid shrink-0 grid-cols-1 gap-2 @min-[360px]:grid-cols-3 @min-[640px]:grid-cols-5" data-testid="tiles">
-      <Tile title="CPU" value={percent(sum.cpu)} sub={`${sum.running} running · ${snapshot.cores} cores`} said={cpuSaid(snapshot)} testId="tile-cpu">
-        {over.length > 1 ? (
-          <ChartContainer config={CPU} className="aspect-auto size-full">
-            <AreaChart data={over} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} accessibilityLayer={false}>
-              <YAxis hide domain={[0, (max: number) => Math.max(max, 0.1)]} />
-              <XAxis hide dataKey="at" />
-              <ChartTooltip cursor={false} content={<ChartTooltipContent labelFormatter={(_, payload) => (payload[0]?.payload ? clock(Number(payload[0].payload.at)) : '')} />} />
-              <Area dataKey="cpu" type="monotone" stroke="var(--color-cpu)" fill="var(--color-cpu)" fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} />
-            </AreaChart>
-          </ChartContainer>
-        ) : null}
+    <div className="grid min-w-0 shrink-0 grid-cols-1 gap-2 @min-[360px]:grid-cols-3 @min-[640px]:grid-cols-5" data-testid="tiles" data-axes={layout.axes}>
+      <Tile title="CPU" value={percent(sum.cpu)} sub={`${sum.running} running · ${snapshot.cores} cores`} testId="tile-cpu">
+        <Plot said={cpuSaid(snapshot)} count={over.length > 1 ? over.length : 0} kind="line" height={layout.plot} tip={(i) => cpuTip(over[i] as (typeof over)[number], snapshot.cores)} testId="tile-cpu">
+          {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="cpu" config={CPU} axes={layout.axes} active={active} format={(v) => percent(v)} /> : null)}
+        </Plot>
       </Tile>
-      <Tile title="Memory" value={sizeSaid(sum.rss)} sub={snapshot.memory ? `of ${sizeSaid(snapshot.memory)}` : 'resident'} said={memorySaid(snapshot)} testId="tile-memory">
-        {over.length > 1 ? (
-          <ChartContainer config={MEMORY} className="aspect-auto size-full">
-            <AreaChart data={over} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} accessibilityLayer={false}>
-              <YAxis hide domain={[0, 'auto']} />
-              <XAxis hide dataKey="at" />
-              <ChartTooltip cursor={false} content={<ChartTooltipContent labelFormatter={(_, payload) => (payload[0]?.payload ? clock(Number(payload[0].payload.at)) : '')} />} />
-              <Area dataKey="gb" type="monotone" stroke="var(--color-gb)" fill="var(--color-gb)" fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} />
-            </AreaChart>
-          </ChartContainer>
-        ) : null}
+      <Tile title="Memory" value={sizeSaid(sum.rss)} sub={snapshot.memory ? `of ${sizeSaid(snapshot.memory)}` : 'resident'} testId="tile-memory">
+        <Plot said={memorySaid(snapshot)} count={over.length > 1 ? over.length : 0} kind="line" height={layout.plot} tip={(i) => memoryTip(over[i] as (typeof over)[number], snapshot.memory)} testId="tile-memory">
+          {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="gb" config={MEMORY} axes={layout.axes} active={active} format={(v) => `${v} GB`} /> : null)}
+        </Plot>
       </Tile>
       <Tile
         title="Calls"
         value={slow[0] ? `${msSaid(slow[0].p95)} p95` : 'none timed'}
         sub={calls ? `${errors} of ${calls} failed` : 'last 5 minutes'}
         subTone={calls && errors / calls >= 0.2 ? 'text-destructive' : undefined}
-        said={latencySaid(latencies)}
         testId="tile-calls"
       >
-        {slow.length ? <Bars data={slow} dataKey="p95" config={CALLS} unit={(v) => msSaid(v)} /> : null}
+        <Plot said={latencySaid(latencies)} count={slow.length} kind="bar" height={layout.plot} tip={(i) => callsTip(slow[i] as (typeof slow)[number])} testId="tile-calls">
+          {(active) => (slow.length ? <Bars data={slow} dataKey="p95" config={CALLS} axes={layout.axes} active={active} format={(v) => msSaid(v)} /> : null)}
+        </Plot>
       </Tile>
-      <Tile
-        title="Restarts"
-        value={`${starts} today`}
-        sub={crashes ? `${crashes} after a crash` : 'no crash'}
-        subTone={crashes ? 'text-destructive' : undefined}
-        said={restartsSaid(snapshot)}
-        testId="tile-restarts"
-      >
-        {restarted.length ? <Bars data={restarted} dataKey="starts" config={STARTS} unit={(v) => `${v} starts`} fill={(one) => (one.crashed ? 'var(--destructive)' : 'var(--color-starts)')} /> : null}
+      <Tile title="Restarts" value={`${starts} today`} sub={crashes ? `${crashes} after a crash` : 'no crash'} subTone={crashes ? 'text-destructive' : undefined} testId="tile-restarts">
+        <Plot said={restartsSaid(snapshot)} count={restarted.length} kind="bar" height={layout.plot} tip={(i) => restartsTip(restarted[i] as (typeof restarted)[number])} testId="tile-restarts">
+          {(active) =>
+            restarted.length ? (
+              <Bars data={restarted} dataKey="starts" config={STARTS} axes={layout.axes} active={active} format={(v) => String(v)} fill={(one) => (one.crashes ? 'var(--destructive)' : 'var(--color-starts)')} />
+            ) : null
+          }
+        </Plot>
       </Tile>
       <Tile
         title="Disk"
         value={snapshot.disk.free === null ? '—' : `${sizeSaid(snapshot.disk.free)} free`}
         sub={worktrees.count ? `${worktrees.count} worktrees, ${worktrees.withModules} with node_modules` : snapshot.disk.total ? `of ${sizeSaid(snapshot.disk.total)}` : 'measuring'}
         subTone={disk !== 'normal' ? 'text-destructive' : undefined}
-        said={diskSaid(snapshot.disk)}
         testId="tile-disk"
       >
-        {uses.length ? <Bars data={uses} dataKey="gb" config={DISK} unit={(v) => `${v} GB`} /> : null}
+        <Plot
+          said={`${diskSaid(snapshot.disk)} ${segmentsSaid(segments)}`}
+          count={segments.length}
+          kind="ring"
+          height={layout.ring}
+          fractions={segments.map((one) => one.fraction)}
+          tip={(i) => segmentTip(segments[i] as Segment)}
+          testId="tile-disk"
+          aside={<Segments segments={segments} shown={layout.legend} />}
+        >
+          {(active) => (segments.length ? <Doughnut segments={segments} size={layout.ring} active={active} /> : null)}
+        </Plot>
       </Tile>
     </div>
   )
 }
 
-function Bars<T extends { name: string }>({ data, dataKey, config, unit, fill }: { data: T[]; dataKey: keyof T & string; config: ChartConfig; unit: (value: number) => string; fill?: (one: T) => string }) {
+const MARGIN = { top: 2, right: 0, bottom: 0, left: 0 }
+/* Room for the top tick's text above the plot and the last time's below it, so no axis is clipped. */
+const AXES_MARGIN = { top: 6, right: 2, bottom: 0, left: 0 }
+
+/** The first time anchored at its start and the last at its end, so neither runs off the plot. */
+function EdgeTick({ x, y, payload, index, format }: { x?: number; y?: number; payload?: { value: number }; index?: number; format: (value: number) => string }) {
+  return (
+    <text x={x} y={y} dy={10} textAnchor={index === 0 ? 'start' : 'end'} fontSize={10} fill="var(--muted-foreground)">
+      {format(Number(payload?.value ?? 0))}
+    </text>
+  )
+}
+
+function YTicks({ top, format }: { top: number; format: (value: number) => string }) {
+  return <YAxis width={40} domain={[0, top]} ticks={[0, top]} tickFormatter={format} tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval={0} />
+}
+
+function AreaPlot<T extends { at: number }>({ data, dataKey, config, axes, active, format }: { data: T[]; dataKey: keyof T & string; config: ChartConfig; axes: boolean; active: number | null; format: (value: number) => string }) {
+  const top = niceTop(Math.max(...data.map((one) => Number(one[dataKey]))))
+  const first = data[0]?.at ?? 0
+  const last = data.at(-1)?.at ?? 0
+  const on = active === null ? null : data[active]
   return (
     <ChartContainer config={config} className="aspect-auto size-full">
-      <BarChart data={data} margin={{ top: 2, right: 0, bottom: 0, left: 0 }} barCategoryGap={1} accessibilityLayer={false}>
-        <YAxis hide domain={[0, (max: number) => Math.max(max, 1)]} />
+      <AreaChart data={data} margin={axes ? AXES_MARGIN : MARGIN} accessibilityLayer={false}>
+        {axes ? <CartesianGrid vertical={false} stroke="var(--grid)" /> : null}
+        {axes ? <YTicks top={top} format={format} /> : <YAxis hide domain={[0, top]} />}
+        <XAxis hide={!axes} dataKey="at" type="number" domain={[first, last]} ticks={[first, last]} interval={0} tickLine={false} axisLine={false} height={16} tick={<EdgeTick format={hm} />} />
+        {on ? <ReferenceLine x={on.at} stroke="var(--muted-foreground)" strokeDasharray="2 2" /> : null}
+        <Area dataKey={dataKey} type="monotone" stroke={`var(--color-${dataKey})`} fill={`var(--color-${dataKey})`} fillOpacity={0.25} strokeWidth={2} isAnimationActive={false} />
+        {on ? <ReferenceDot x={on.at} y={Number(on[dataKey])} r={3} fill={`var(--color-${dataKey})`} stroke="var(--card)" /> : null}
+      </AreaChart>
+    </ChartContainer>
+  )
+}
+
+function Bars<T extends { name: string }>({ data, dataKey, config, axes, active, format, fill }: { data: T[]; dataKey: keyof T & string; config: ChartConfig; axes: boolean; active: number | null; format: (value: number) => string; fill?: (one: T) => string }) {
+  const top = niceTop(Math.max(1, ...data.map((one) => Number(one[dataKey]))))
+  return (
+    <ChartContainer config={config} className="aspect-auto size-full">
+      <BarChart data={data} margin={axes ? AXES_MARGIN : MARGIN} barCategoryGap={1} accessibilityLayer={false}>
+        {axes ? <CartesianGrid vertical={false} stroke="var(--grid)" /> : null}
+        {axes ? <YTicks top={top} format={format} /> : <YAxis hide domain={[0, top]} />}
+        {/* The names are in the tooltip and the table: a narrow chart has no room for them under the bars. */}
         <XAxis hide dataKey="name" />
-        <ChartTooltip
-          cursor={false}
-          content={<ChartTooltipContent labelFormatter={(_, payload) => (payload[0]?.payload ? `${String(payload[0].payload.name)}: ${unit(Number(payload[0].payload[dataKey]))}` : '')} />}
-        />
         <Bar dataKey={dataKey} radius={[2, 2, 0, 0]} minPointSize={3} isAnimationActive={false} fill={`var(--color-${dataKey})`}>
-          {fill ? data.map((one) => <Cell key={one.name} fill={fill(one)} />) : null}
+          {data.map((one, i) => (
+            <Cell key={one.name} fill={fill ? fill(one) : `var(--color-${dataKey})`} fillOpacity={active === null || active === i ? 1 : 0.4} />
+          ))}
         </Bar>
       </BarChart>
     </ChartContainer>
   )
 }
 
-function Tile({ title, value, sub, subTone, said, testId, children }: { title: string; value: string; sub: string; subTone?: string; said: string; testId: string; children: React.ReactNode }) {
+function Doughnut({ segments, size, active }: { segments: readonly Segment[]; size: number; active: number | null }) {
+  const centre = centreLabel(segments, size)
   return (
-    <section aria-label={title} className="bg-card flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 @min-[360px]:flex-col @min-[360px]:items-stretch" data-testid={testId}>
-      <div className="min-w-0 flex-1">
-        <h2 className="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">{title}</h2>
-        <p className="truncate text-sm font-semibold tabular-nums" data-testid={`${testId}-value`}>
+    <div className="relative size-full">
+      <PieChart width={size} height={size} accessibilityLayer={false}>
+        <Pie data={segments as Segment[]} dataKey="bytes" nameKey="short" innerRadius={(size / 2) * HOLE} outerRadius={size / 2 - 1} startAngle={90} endAngle={-270} stroke="var(--card)" strokeWidth={1} isAnimationActive={false}>
+          {segments.map((one, i) => (
+            <Cell key={one.key} fill={DISK[one.key]} fillOpacity={active === null || active === i ? 1 : 0.4} />
+          ))}
+        </Pie>
+      </PieChart>
+      {centre ? (
+        <span className="text-muted-foreground pointer-events-none absolute inset-0 flex items-center justify-center text-[9px] font-medium" data-testid="tile-disk-centre">
+          {centre}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+/** The doughnut in words: each consumer and its size. Beside it when the tile has room, for screen readers only when not. */
+function Segments({ segments, shown }: { segments: readonly Segment[]; shown: boolean }) {
+  return (
+    <ul aria-label="What Kehikot takes on the disk" className={shown ? 'flex min-w-0 flex-1 flex-col gap-0.5 text-[11px] leading-tight tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
+      {segments.map((one) => (
+        <li key={one.key} className="flex min-w-0 items-center gap-1.5">
+          <span aria-hidden className="size-2 shrink-0 rounded-[2px]" style={{ background: DISK[one.key] }} />
+          <span className="min-w-0 flex-1 truncate" title={one.label}>
+            {one.label}
+          </span>
+          <span className="text-muted-foreground shrink-0">{sizeSaid(one.bytes)}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** A glance tile: its title and number in one row, a line in words, then its plot at a height of its own. Nothing overlays the plot but the tooltip. */
+function Tile({ title, value, sub, subTone, testId, children }: { title: string; value: string; sub: string; subTone?: string; testId: string; children: React.ReactNode }) {
+  return (
+    <section aria-label={title} className="bg-card flex min-w-0 flex-col gap-1 rounded-md border px-2 py-1.5" data-testid={testId}>
+      <div className="flex min-w-0 items-baseline justify-between gap-2" data-testid={`${testId}-head`}>
+        <h2 className="text-muted-foreground min-w-0 truncate text-[10px] font-medium tracking-wide uppercase" title={title}>
+          {title}
+        </h2>
+        <p className="min-w-0 truncate text-sm font-semibold tabular-nums" data-testid={`${testId}-value`} title={value}>
           {value}
         </p>
-        <p className={`truncate text-xs ${subTone ?? 'text-muted-foreground'}`}>{sub}</p>
       </div>
-      {/* The chart is a picture of what the sentence says; the sentence is what a screen reader reads. */}
-      <div role="img" aria-label={said} title={said} className="h-9 w-16 shrink-0 @min-[360px]:h-10 @min-[360px]:w-full">
-        {children}
-      </div>
+      <p className={`truncate text-xs ${subTone ?? 'text-muted-foreground'}`} title={sub}>
+        {sub}
+      </p>
+      {children}
     </section>
   )
 }
