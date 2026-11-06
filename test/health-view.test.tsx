@@ -19,60 +19,49 @@ const state: HeaderState = { view: 'health', range: 5, style: 'lines', paused: f
 const traffic = { calls: [call({ at: NOW - 1000, by: 'kehikot.kanban', ms: 30 })], budgets: [], limits: null, processes: null, problem: null, gap: false, at: NOW }
 
 describe('the Health view', () => {
-  test('five tiles, each with its number in words and its chart as an image of a sentence', () => {
+  test('three tiles, each with its number in words and its chart as an image of a sentence; no Calls or Restarts', () => {
     const snapshot = snapshotOf(NOW)
-    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[]} problem={null} now={NOW} />)
-    for (const name of ['CPU', 'Memory', 'Calls', 'Restarts', 'Disk']) expect(screen.getByRole('region', { name })).toBeTruthy()
+    render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} />)
+    for (const name of ['CPU', 'Memory', 'Disk']) expect(screen.getByRole('region', { name })).toBeTruthy()
+    for (const name of ['Calls', 'Restarts']) expect(screen.queryByRole('region', { name })).toBeNull()
+    expect(screen.getByTestId('tiles').children).toHaveLength(3)
     expect(screen.getByTestId('tile-cpu-value').textContent).toBe('134%')
     expect(screen.getByTestId('tile-memory-value').textContent).toBe('960 MB')
-    expect(screen.getByTestId('tile-disk-value').textContent).toBe('60 GB free')
+    expect(screen.getByTestId('tile-disk-value').textContent).toBe('Kehikot uses 123 GB')
     const pictures = screen.getAllByRole('img').map((one) => one.getAttribute('aria-label'))
     expect(pictures.some((said) => said?.includes('use 134% CPU'))).toBe(true)
-    expect(pictures.some((said) => said?.includes('after a crash'))).toBe(true)
+    expect(screen.getByTestId('health').textContent).not.toMatch(/restart|p95|Starts/i)
   })
 
-  test('unmeasured, everything: the modules worth a look with their level in words, the table, the disk and Monitor’s own cost', () => {
+  test('everything: one crash line, the modules table, the disk and Monitor’s own cost', () => {
     const snapshot = snapshotOf(NOW)
-    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[]} problem={null} now={NOW} />)
+    render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} />)
     expect(screen.getByTestId('health').getAttribute('data-detail')).toBe('full')
-    expect(screen.getByTestId('flagged').textContent).toContain('crashed in the last hour (critical)')
-    expect(screen.getByTestId('flagged').textContent).toContain('120% CPU (warning)')
+    expect(screen.getByTestId('flagged').textContent).toBe('Diff crashed in the last hour.')
+    expect(screen.queryByText('Worth a look')).toBeNull()
     const table = screen.getByTestId('modules').textContent ?? ''
     expect(table).toContain('Kanban')
+    expect(table).toContain('critical: crashed in the last hour')
+    expect(table).toContain('warning: 120% CPU')
     expect(table).not.toContain('Notes')
     expect(screen.getByText('1 more registered modules are not running.')).toBeTruthy()
-    expect(screen.getByTestId('disk').textContent).toContain('40 worktrees, 30 with node_modules')
+    expect(screen.getByTestId('disk').textContent).toContain('Agent worktrees (code copies agents work in) · 120 GB · 98%')
+    expect(screen.getByTestId('health').textContent).toContain('of what Kehikot uses, not of the disk')
+    expect(screen.getByTestId('health').textContent).toContain('40 agent worktrees, 30 with node_modules')
+    expect(screen.getByTestId('disk-hint').textContent).toContain('Settings › About › Clean up finished worktrees')
     expect(screen.getByTestId('self').textContent).toContain('only while this page or an agent is looking')
   })
 
-  test('a day of updates and restarts: one quiet line, and the Restarts tile splits them without a warning colour', () => {
+  test('nothing crashed in the last hour: no line at all, however many starts there were', () => {
     const snapshot = snapshotOf(NOW)
-    /* Claude started nine times today, all of them updates or Kehikot starting it; nothing crashed, nothing is busy. */
-    snapshot.modules = [
-      module(NOW, { id: 'kehikko', port: 4170 }),
-      module(NOW, { id: 'kehikot.claude', port: 9030, starts: 9, updates: 5 }),
-      module(NOW, { id: 'kehikot.paper', port: 9040, starts: 4, updates: 1 }),
-    ]
-    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[]} problem={null} now={NOW} />)
-    expect(screen.getByTestId('flagged').textContent).toBe('Nothing needs a look.')
-    expect(screen.queryByText('Worth a look')).toBeNull()
-    expect(screen.getByTestId('tile-restarts-value').textContent).toBe('14 today')
-    const tile = screen.getByRole('region', { name: 'Restarts' })
-    expect(tile.textContent).toContain('6 updates, 8 restarts, no crash')
-    expect(tile.innerHTML).not.toContain('destructive')
-    expect(tile.innerHTML).not.toContain('amber')
-  })
-
-  test('a crash still shows in the Restarts tile as a count, in words, not in red', () => {
-    const snapshot = snapshotOf(NOW)
-    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[]} problem={null} now={NOW} />)
-    const tile = screen.getByRole('region', { name: 'Restarts' })
-    expect(tile.textContent).toContain('1 update, 4 restarts, 1 crash')
-    expect(tile.innerHTML).not.toContain('destructive')
+    snapshot.modules = [module(NOW, { id: 'kehikko', port: 4170 }), module(NOW, { id: 'kehikot.diff', port: 9030, crashedAt: [NOW - 2 * 3_600_000] })]
+    render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} />)
+    expect(screen.queryByTestId('flagged')).toBeNull()
+    expect(screen.queryByText('Nothing needs a look.')).toBeNull()
   })
 
   test('before the first sample, a sentence', () => {
-    render(<HealthView snapshot={emptySnapshot()} judged={[]} latencies={[]} problem={null} now={NOW} />)
+    render(<HealthView snapshot={emptySnapshot()} judged={[]} problem={null} now={NOW} />)
     expect(screen.getByRole('status').textContent).toContain('first figures')
   })
 

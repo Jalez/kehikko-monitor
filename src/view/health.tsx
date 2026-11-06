@@ -1,27 +1,21 @@
 import { useRef } from 'react'
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
 import {
   agoSaid,
   average,
   cpuSaid,
+  crashesSaid,
   detailOf,
   diskLevel,
   diskSaid,
-  latencySaid,
   memorySaid,
-  msSaid,
-  nameOf,
   percent,
-  restartsOf,
-  restartsSaid,
   sizeSaid,
   totals,
   totalsOver,
-  whySaid,
   worktreesOf,
-  type CallerLatency,
   type Judged,
   type Level,
   type Box,
@@ -29,10 +23,11 @@ import {
 } from '@/health/model'
 import { Plot } from '@/view/plot'
 import {
-  callsTip,
   centreLabel,
+  cleanupHint,
   cpuTip,
   diskSegments,
+  diskWords,
   HEAD_HEIGHT,
   HOLE,
   LEGEND_ROW,
@@ -40,10 +35,11 @@ import {
   niceTop,
   PAD_X,
   PAD_Y,
-  restartsTip,
   ringRow,
   ROW_GAP,
+  SHARE_OF,
   SUB_HEIGHT,
+  segmentSaid,
   segmentsSaid,
   segmentTip,
   tileLayout,
@@ -55,9 +51,9 @@ import { useBox } from '@/view/use-box'
 
 /**
  * The Health view: how heavy and how well Kehikot and its modules are running on this computer, at
- * a glance. Five tiles — CPU, memory, calls, restarts and disk — each with its number in words and
- * a small chart that is an image of the same sentence; then, as the container grows, the modules
- * worth a look and a table of every running module. The page measures its own box (`useBox`), as
+ * a glance. Three tiles — CPU, memory and disk — each with its number in words and
+ * a small chart that is an image of the same sentence; then, as the container grows, one line when a module
+ * crashed in the last hour and a table of every running module. The page measures its own box (`useBox`), as
  * Test runs does, because a container on a canvas is sized by the person, not by the window.
  *
  * Never colour alone: a level is a word (`warning`, `critical`) beside its colour.
@@ -65,8 +61,6 @@ import { useBox } from '@/view/use-box'
 
 const CPU: ChartConfig = { cpu: { label: 'CPU (cores)', color: 'var(--series-1)' } }
 const MEMORY: ChartConfig = { gb: { label: 'Memory (GB)', color: 'var(--series-3)' } }
-const CALLS: ChartConfig = { p95: { label: 'p95 (ms)', color: 'var(--series-2)' } }
-const STARTS: ChartConfig = { starts: { label: 'Starts today', color: 'var(--series-7)' } }
 /* One colour per consumer of the disk, never by order: a segment keeps its colour as sizes change. */
 const DISK: Record<SegmentKey, string> = { worktrees: 'var(--series-4)', modules: 'var(--series-1)', frame: 'var(--series-3)', logs: 'var(--series-5)', other: 'var(--series-other)' }
 
@@ -75,7 +69,7 @@ const LEVEL_SAID: Record<Level, string> = { normal: '', warn: 'warning', critica
 
 const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
-export function HealthView({ snapshot, judged, latencies, problem, now, box: given }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; problem: string | null; now: number; box?: Box }) {
+export function HealthView({ snapshot, judged, problem, now, box: given }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; box?: Box }) {
   const box = useRef<HTMLDivElement>(null)
   const measured = useBox(box)
   const size = given ?? measured
@@ -88,14 +82,14 @@ export function HealthView({ snapshot, judged, latencies, problem, now, box: giv
           {problem ?? (snapshot.why || 'Looking at the processes… the first figures come in a few seconds.')}
         </p>
       ) : (
-        <Shown snapshot={snapshot} judged={judged} latencies={latencies} problem={problem} now={now} detail={detail} width={size?.width ?? null} />
+        <Shown snapshot={snapshot} judged={judged} problem={problem} now={now} detail={detail} width={size?.width ?? null} />
       )}
     </div>
   )
 }
 
-function Shown({ snapshot, judged, latencies, problem, now, detail, width }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null }) {
-  const flagged = judged.filter((one) => one.level !== 'normal')
+function Shown({ snapshot, judged, problem, now, detail, width }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null }) {
+  const crashed = crashesSaid(snapshot, now)
   return (
     <>
       {problem || snapshot.why ? (
@@ -103,32 +97,14 @@ function Shown({ snapshot, judged, latencies, problem, now, detail, width }: { s
           {problem ?? snapshot.why}
         </p>
       ) : null}
-      <Tiles snapshot={snapshot} latencies={latencies} width={width} />
-      {detail !== 'glance' ? (
-        flagged.length ? (
-          <section aria-labelledby="flagged-title" className="flex min-w-0 flex-col gap-1">
-            <h2 id="flagged-title" className="text-sm font-medium">
-              Worth a look
-            </h2>
-            <ul className="flex flex-col gap-0.5 text-xs" data-testid="flagged">
-              {flagged.map((one) => (
-                <li key={one.id} className="flex gap-1.5">
-                  <span className="font-medium">{one.name}</span>
-                  <span className={LEVEL_TONE[one.level]}>
-                    {one.said} ({LEVEL_SAID[one.level]})
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : (
-          /* Nothing qualifies: one quiet line, never a list of what is fine. */
-          <p className="text-muted-foreground text-xs" data-testid="flagged">
-            Nothing needs a look.
-          </p>
-        )
+      <Tiles snapshot={snapshot} width={width} />
+      {/* Only a crash in the last hour is said, as one quiet line; otherwise nothing. */}
+      {detail !== 'glance' && crashed ? (
+        <p className="text-muted-foreground text-xs" data-testid="flagged">
+          {crashed}.
+        </p>
       ) : null}
-      {detail === 'full' ? <Modules snapshot={snapshot} judged={judged} latencies={latencies} now={now} /> : null}
+            {detail === 'full' ? <Modules snapshot={snapshot} judged={judged} /> : null}
       {detail === 'full' ? <DiskList snapshot={snapshot} now={now} /> : null}
       {detail === 'full' && snapshot.self ? (
         <p className="text-muted-foreground text-xs" data-testid="self">
@@ -139,21 +115,17 @@ function Shown({ snapshot, judged, latencies, problem, now, detail, width }: { s
   )
 }
 
-function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: readonly CallerLatency[]; width: number | null }) {
+function Tiles({ snapshot, width }: { snapshot: Snapshot; width: number | null }) {
   const layout = tileLayout(width)
   const sum = totals(snapshot)
   const over = totalsOver(snapshot).map((one) => ({ at: one.at, cpu: Math.round(one.cpu * 100) / 100, rss: one.rss, gb: Math.round((one.rss / 1e9) * 100) / 100 }))
-  const slow = latencies.filter((one) => one.p95 !== null).slice(0, 8).map((one) => ({ name: nameOf(one.by), by: one.by, p95: one.p95 as number, p50: one.p50, calls: one.calls, errors: one.errors }))
-  const errors = latencies.reduce((n, one) => n + one.errors, 0)
-  const calls = latencies.reduce((n, one) => n + one.calls, 0)
-  const restarted = [...snapshot.modules].filter((m) => m.starts).sort((a, b) => b.starts - a.starts).slice(0, 8).map((m) => ({ name: nameOf(m.id), id: m.id, starts: m.starts, crashes: m.crashes, updates: m.updates }))
-  const day = restartsOf(snapshot.modules)
   const segments = diskSegments(snapshot.disk)
-  const worktrees = worktreesOf(snapshot.disk)
   const disk = diskLevel(snapshot.disk)
+  const words = diskWords(snapshot.disk, segments, disk !== 'normal')
+  const hint = cleanupHint(segments)
   return (
     /* No cards: the grid's 1 px gap shows the border colour between tiles, which stand on the page's own background. */
-    <div className="bg-border grid min-w-0 shrink-0 grid-cols-1 gap-px @min-[360px]:grid-cols-3 @min-[640px]:grid-cols-5" data-testid="tiles" data-axes={layout.axes} data-compact={layout.compact}>
+    <div className="bg-border grid min-w-0 shrink-0 grid-cols-1 gap-px @min-[360px]:grid-cols-2 @min-[640px]:grid-cols-3" data-testid="tiles" data-axes={layout.axes} data-compact={layout.compact}>
       <Tile layout={layout} title="CPU" value={percent(sum.cpu)} sub={`${sum.running} running · ${snapshot.cores} cores`} testId="tile-cpu">
         <Plot said={cpuSaid(snapshot)} count={over.length > 1 ? over.length : 0} kind="line" height={layout.plot} tip={(i) => cpuTip(over[i] as (typeof over)[number], snapshot.cores)} testId="tile-cpu">
           {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="cpu" config={CPU} axes={layout.axes} active={active} format={(v) => percent(v)} /> : null)}
@@ -166,32 +138,10 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
       </Tile>
       <Tile
         layout={layout}
-        title="Calls"
-        value={slow[0] ? `${msSaid(slow[0].p95)} p95` : 'none timed'}
-        sub={calls ? `${errors} of ${calls} failed` : 'last 5 minutes'}
-        subTone={calls && errors / calls >= 0.2 ? 'text-destructive' : undefined}
-        testId="tile-calls"
-      >
-        <Plot said={latencySaid(latencies)} count={slow.length} kind="bar" height={layout.plot} tip={(i) => callsTip(slow[i] as (typeof slow)[number])} testId="tile-calls">
-          {(active) => (slow.length ? <Bars data={slow} dataKey="p95" config={CALLS} axes={layout.axes} active={active} format={(v) => msSaid(v)} /> : null)}
-        </Plot>
-      </Tile>
-      {/* Information, not an alarm: a crash worth a look is said under Worth a look, so no warning colour here. */}
-      <Tile layout={layout} title="Restarts" value={`${day.starts} today`} sub={whySaid(day)} testId="tile-restarts">
-        <Plot said={restartsSaid(snapshot)} count={restarted.length} kind="bar" height={layout.plot} tip={(i) => restartsTip(restarted[i] as (typeof restarted)[number])} testId="tile-restarts">
-          {(active) =>
-            restarted.length ? (
-              <Bars data={restarted} dataKey="starts" config={STARTS} axes={layout.axes} active={active} format={(v) => String(v)} />
-            ) : null
-          }
-        </Plot>
-      </Tile>
-      <Tile
-        layout={layout}
         className="@min-[360px]:col-span-2 @min-[640px]:col-span-1"
         title="Disk"
-        value={snapshot.disk.free === null ? '—' : `${sizeSaid(snapshot.disk.free)} free`}
-        sub={worktrees.count ? `${worktrees.count} worktrees, ${worktrees.withModules} with node_modules` : snapshot.disk.total ? `of ${sizeSaid(snapshot.disk.total)}` : 'measuring'}
+        value={words.value}
+        sub={words.sub}
         subTone={disk !== 'normal' ? 'text-destructive' : undefined}
         testId="tile-disk"
       >
@@ -208,6 +158,11 @@ function Tiles({ snapshot, latencies, width }: { snapshot: Snapshot; latencies: 
         >
           {(active) => (segments.length ? <Doughnut segments={segments} size={layout.ring} active={active} /> : null)}
         </Plot>
+        {hint ? (
+          <p className="text-muted-foreground text-[11px]" data-testid="tile-disk-hint">
+            {hint}
+          </p>
+        ) : null}
       </Tile>
     </div>
   )
@@ -249,25 +204,6 @@ function AreaPlot<T extends { at: number }>({ data, dataKey, config, axes, activ
   )
 }
 
-function Bars<T extends { name: string }>({ data, dataKey, config, axes, active, format, fill }: { data: T[]; dataKey: keyof T & string; config: ChartConfig; axes: boolean; active: number | null; format: (value: number) => string; fill?: (one: T) => string }) {
-  const top = niceTop(Math.max(1, ...data.map((one) => Number(one[dataKey]))))
-  return (
-    <ChartContainer config={config} className="aspect-auto size-full">
-      <BarChart data={data} margin={axes ? AXES_MARGIN : MARGIN} barCategoryGap={1} accessibilityLayer={false}>
-        {axes ? <CartesianGrid vertical={false} stroke="var(--grid)" /> : null}
-        {axes ? <YTicks top={top} format={format} /> : <YAxis hide domain={[0, top]} />}
-        {/* The names are in the tooltip and the table: a narrow chart has no room for them under the bars. */}
-        <XAxis hide dataKey="name" />
-        <Bar dataKey={dataKey} radius={[2, 2, 0, 0]} minPointSize={3} isAnimationActive={false} fill={`var(--color-${dataKey})`}>
-          {data.map((one, i) => (
-            <Cell key={one.name} fill={fill ? fill(one) : `var(--color-${dataKey})`} fillOpacity={active === null || active === i ? 1 : 0.4} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ChartContainer>
-  )
-}
-
 function Doughnut({ segments, size, active }: { segments: readonly Segment[]; size: number; active: number | null }) {
   const centre = centreLabel(segments, size)
   return (
@@ -291,14 +227,16 @@ function Doughnut({ segments, size, active }: { segments: readonly Segment[]; si
 /** The doughnut in words: each consumer and its size. Beside it when the tile has room, for screen readers only when not. */
 function Segments({ segments, shown }: { segments: readonly Segment[]; shown: boolean }) {
   return (
-    <ul aria-label="What Kehikot takes on the disk" className={shown ? 'flex min-w-0 flex-1 flex-col text-[11px] tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
+    <ul aria-label={`What Kehikot uses on the disk, each share ${SHARE_OF}`} className={shown ? 'flex min-w-0 flex-1 flex-col text-[11px] tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
       {segments.map((one) => (
         <li key={one.key} className="flex min-w-0 items-center gap-1.5" style={shown ? { height: LEGEND_ROW, lineHeight: `${LEGEND_ROW}px` } : undefined}>
           <span aria-hidden className="size-2 shrink-0 rounded-[2px]" style={{ background: DISK[one.key] }} />
           <span className="min-w-0 flex-1 truncate" title={one.label}>
             {one.label}
           </span>
-          <span className="text-muted-foreground shrink-0">{sizeSaid(one.bytes)}</span>
+          <span className="text-muted-foreground shrink-0">
+            {sizeSaid(one.bytes)} · {percent(one.fraction)}
+          </span>
         </li>
       ))}
     </ul>
@@ -337,10 +275,9 @@ function Tile({ layout, className = '', title, value, sub, subTone, testId, chil
   )
 }
 
-function Modules({ snapshot, judged, latencies, now }: { snapshot: Snapshot; judged: readonly Judged[]; latencies: readonly CallerLatency[]; now: number }) {
-  const lat = new Map(latencies.map((one) => [one.by, one]))
+function Modules({ snapshot, judged }: { snapshot: Snapshot; judged: readonly Judged[] }) {
   const byId = new Map(snapshot.modules.map((m) => [m.id, m]))
-  const rows = judged.filter((one) => byId.get(one.id)?.running || one.level !== 'normal' || (byId.get(one.id)?.starts ?? 0) > 0)
+  const rows = judged.filter((one) => byId.get(one.id)?.running || one.level !== 'normal')
   const stopped = snapshot.modules.length - rows.length
   return (
     <section aria-labelledby="modules-title" className="flex min-w-0 flex-col gap-1">
@@ -354,10 +291,6 @@ function Modules({ snapshot, judged, latencies, now }: { snapshot: Snapshot; jud
               <th className="py-1 pr-2 font-normal">Module</th>
               <th className="py-1 pr-2 text-right font-normal">CPU</th>
               <th className="py-1 pr-2 text-right font-normal">Memory</th>
-              <th className="py-1 pr-2 text-right font-normal" title="95% of its calls in the last 5 minutes took at most this long">p95</th>
-              <th className="hidden py-1 pr-2 text-right font-normal @md:table-cell">Failed</th>
-              <th className="hidden py-1 pr-2 text-right font-normal @md:table-cell">Starts</th>
-              <th className="hidden py-1 pr-2 text-right font-normal @lg:table-cell">Started</th>
               <th className="py-1 font-normal">State</th>
             </tr>
           </thead>
@@ -365,21 +298,11 @@ function Modules({ snapshot, judged, latencies, now }: { snapshot: Snapshot; jud
             {rows.map((one) => {
               const m = byId.get(one.id)
               if (!m) return null
-              const l = lat.get(one.id)
-              const p95 = Math.max(l?.p95 ?? -1, l?.answered?.p95 ?? -1)
-              const failed = (l?.errors ?? 0) + (l?.answered?.errors ?? 0)
               return (
                 <tr key={one.id} className="border-t">
                   <td className="py-1 pr-2">{one.name}</td>
                   <td className="py-1 pr-2 text-right">{m.running ? percent(average(m.points.slice(-6))) : '—'}</td>
                   <td className="py-1 pr-2 text-right">{m.running && m.now ? sizeSaid(m.now.rss) : '—'}</td>
-                  <td className="py-1 pr-2 text-right">{p95 >= 0 ? msSaid(p95) : '—'}</td>
-                  <td className="hidden py-1 pr-2 text-right @md:table-cell">{l ? failed : '—'}</td>
-                  <td className="hidden py-1 pr-2 text-right @md:table-cell">
-                    {m.starts}
-                    {m.crashes ? ` (${m.crashes} crash${m.crashes === 1 ? '' : 'es'})` : ''}
-                  </td>
-                  <td className="hidden py-1 pr-2 text-right @lg:table-cell">{m.startedAt ? agoSaid(m.startedAt, now) : '—'}</td>
                   <td className={`py-1 ${LEVEL_TONE[one.level]}`}>{one.level === 'normal' ? (m.running ? 'running' : 'not running') : `${LEVEL_SAID[one.level]}: ${one.said}`}</td>
                 </tr>
               )
@@ -394,27 +317,34 @@ function Modules({ snapshot, judged, latencies, now }: { snapshot: Snapshot; jud
 
 function DiskList({ snapshot, now }: { snapshot: Snapshot; now: number }) {
   const { disk } = snapshot
+  const segments = diskSegments(disk)
+  const hint = cleanupHint(segments)
+  const trees = worktreesOf(disk)
   return (
     <section aria-labelledby="disk-title" className="flex min-w-0 flex-col gap-1">
       <h2 id="disk-title" className="text-sm font-medium">
-        What takes the most disk
+        What Kehikot uses on the disk
       </h2>
       <p className="text-muted-foreground text-xs">
-        {diskSaid(disk)}
+        {diskSaid(disk)} Each share is {SHARE_OF}, not of the disk.
         {disk.at !== null ? ` Measured ${agoSaid(disk.at, now)}; sizes only.` : ''}
         {disk.why ? ` ${disk.why}` : ''}
       </p>
       <ul className="flex flex-col gap-0.5 text-xs tabular-nums" data-testid="disk">
-        {disk.uses.slice(0, 10).map((use) => (
-          <li key={use.label} className="flex min-w-0 gap-2">
-            <span className="w-16 shrink-0 text-right">{use.bytes ? sizeSaid(use.bytes) : 'measuring'}</span>
-            <span className="truncate" title={use.label}>
-              {use.label}
-              {use.count !== undefined ? ` — ${use.count} worktrees, ${use.withModules} with node_modules` : ''}
+        {segments.map((one) => (
+          <li key={one.key} className="flex min-w-0 gap-2">
+            <span className="truncate" title={segmentSaid(one)}>
+              {segmentSaid(one)}
             </span>
           </li>
         ))}
       </ul>
+      {trees.count ? <p className="text-muted-foreground text-xs">{trees.count} agent worktrees, {trees.withModules} with node_modules.</p> : null}
+      {hint ? (
+        <p className="text-muted-foreground text-xs" data-testid="disk-hint">
+          {hint}
+        </p>
+      ) : null}
     </section>
   )
 }

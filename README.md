@@ -17,13 +17,16 @@ again and again, so redundant polling stands out.
 - **Connections nobody reported.** What Kehikot sees open on its own processes
   and each module's, marked "no reason given".
 - **Health.** Choose View › Health: how much CPU and memory each module and
-  Kehikot use (sampled every 5 seconds), how long their calls take (p50 and
-  p95) and how many fail, how often each was started and whether it crashed,
-  and what takes the most disk — Kehikot's database, installed modules, logs
-  and agent worktrees. Five tiles at a glance, more as the container grows.
+  Kehikot use (sampled every 5 seconds), and what Kehikot uses on the disk —
+  its database, installed modules, logs and agent worktrees, each with its share
+  of what Kehikot uses. Three tiles (CPU, Memory, Disk) at a glance, one column
+  to three side by side as the container widens, a table of modules as it
+  grows. A module that crashed in the last hour is said in one quiet line;
+  otherwise nothing. Calls and restarts are not tracked in Health: Traffic has
+  the calls.
 - **Header and footer.** The header sets Monitor up: View, Range, Chart, Paused
   and Caller. The footer says what is going on: live or paused, the rate,
-  repeats, a limit, the worst module, total CPU and memory, and Clear.
+  repeats, a limit, the worst module, total CPU and memory, a nearly full disk, and Clear.
 - **Agents ask, you watch.** The `traffic` tool answers "what is polling too
   much" from the same record, and `health` answers "what is slow or heavy right
   now"; both read only.

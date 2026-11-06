@@ -1,4 +1,4 @@
-import { msSaid, nameOf, percent, sizeSaid, type Disk } from '../health/model.ts'
+import { percent, sizeSaid, type Disk } from '../health/model.ts'
 
 /**
  * How the Health view's glance tiles are laid out at a width, what each chart's tooltip says, and the
@@ -32,7 +32,7 @@ export const SUB_HEIGHT = 16
 export const ROW_GAP = 2
 
 export interface TileLayout {
-  /** Tiles side by side: one under 360 px, three under 640, then five (the grid's container queries). */
+  /** Tiles side by side: one under 360 px, two under 640, then three (the grid's container queries). */
   columns: number
   /** One tile's width, null until the box is measured. */
   tile: number | null
@@ -48,11 +48,11 @@ export interface TileLayout {
 }
 
 export function columnsOf(width: number): number {
-  return width < 360 ? 1 : width < 640 ? 3 : 5
+  return width < 360 ? 1 : width < 640 ? 2 : 3
 }
 
-/** In three columns the disk takes the last two cells, so the grid has no hole and the doughnut room for its list. */
-export const diskSpan = (columns: number): number => (columns === 3 ? 2 : 1)
+/** In two columns the disk takes the whole second row, so the grid has no hole and the doughnut room for its list. */
+export const diskSpan = (columns: number): number => (columns === 2 ? 2 : 1)
 
 export function tileLayout(width: number | null): TileLayout {
   if (width === null || width <= 0) return { columns: 1, tile: null, axes: false, plot: SPARK_HEIGHT, ring: SPARK_HEIGHT, legend: false, compact: true }
@@ -70,10 +70,10 @@ export function ringRow(layout: Pick<TileLayout, 'ring' | 'legend'>, segments: n
   return Math.max(layout.ring, layout.legend ? segments * LEGEND_ROW : 0)
 }
 
-/** How tall the five tiles stand in one column, in px: four plots, the disk's row, and the hairlines between. */
+/** How tall the three tiles stand in one column, in px: two plots, the disk's row, and the hairlines between. */
 export function columnHeight(layout: TileLayout, segments: number): number {
   const chrome = 2 * PAD_Y + HEAD_HEIGHT + ROW_GAP + (layout.compact ? 0 : SUB_HEIGHT + ROW_GAP)
-  return 4 * (chrome + layout.plot) + chrome + ringRow(layout, segments) + 4 * DIVIDER
+  return 2 * (chrome + layout.plot) + chrome + ringRow(layout, segments) + 2 * DIVIDER
 }
 
 /* ---- pointing at a chart ---- */
@@ -168,15 +168,6 @@ export function memoryTip(point: { at: number; rss: number }, of: number): Tip {
   return { value: sizeSaid(point.rss), detail: of ? `${percent(point.rss / of)} of ${sizeSaid(of)}` : '', note: clock(point.at) }
 }
 
-export function callsTip(one: { by: string; p95: number; calls: number; errors: number }): Tip {
-  return { value: `${msSaid(one.p95)} p95`, detail: clip(nameOf(one.by)), note: `${one.errors} of ${one.calls} failed` }
-}
-
-export function restartsTip(one: { id: string; starts: number; crashes: number; updates?: number }): Tip {
-  const note = one.crashes ? `${one.crashes} after a crash` : one.updates ? `${one.updates} after an update` : 'no crash'
-  return { value: `${one.starts} ${one.starts === 1 ? 'start' : 'starts'}`, detail: clip(nameOf(one.id)), note }
-}
-
 /* ---- the disk, as a doughnut ---- */
 
 /** The doughnut's hole, as a share of its radius. */
@@ -188,19 +179,25 @@ export interface Segment {
   key: SegmentKey
   /** Said in full, in the tooltip and the list. */
   label: string
+  /** Short enough for a tooltip's line. */
+  name: string
   /** Short enough for the doughnut's hole. */
   short: string
   bytes: number
   fraction: number
 }
 
-const NAMES: Record<SegmentKey, { label: string; short: string }> = {
-  frame: { label: 'Kehikot’s database (frame.sqlite)', short: 'frame.sqlite' },
-  modules: { label: 'Installed modules', short: 'Modules' },
-  logs: { label: 'Logs', short: 'Logs' },
-  worktrees: { label: 'Agent worktrees', short: 'Worktrees' },
-  other: { label: 'Other', short: 'Other' },
+/** `label` is said in full (the list, the tool); `short` names it in the doughnut's hole and a tooltip. */
+const NAMES: Record<SegmentKey, { label: string; name: string; short: string }> = {
+  frame: { label: 'Kehikot’s database', name: 'Kehikot’s database', short: 'Database' },
+  modules: { label: 'Installed modules', name: 'Installed modules', short: 'Modules' },
+  logs: { label: 'Logs', name: 'Logs', short: 'Logs' },
+  worktrees: { label: 'Agent worktrees (code copies agents work in)', name: 'Agent worktrees', short: 'Worktrees' },
+  other: { label: 'Other Kehikot files', name: 'Other Kehikot files', short: 'Other files' },
 }
+
+/** Said once beside the shares, so a percentage is not mistaken for how full the disk is. */
+export const SHARE_OF = 'of what Kehikot uses'
 
 /** What Kehikot takes on the disk, one segment per consumer, the biggest first; nothing of size 0. */
 export function diskSegments(disk: Disk): Segment[] {
@@ -208,7 +205,7 @@ export function diskSegments(disk: Disk): Segment[] {
   const others: string[] = []
   for (const use of disk.uses) {
     const key: SegmentKey =
-      use.kind === 'worktrees' ? 'worktrees' : use.kind === 'logs' ? 'logs' : /frame\.sqlite/.test(use.label) ? 'frame' : use.label === 'Installed modules' ? 'modules' : 'other'
+      use.kind === 'worktrees' ? 'worktrees' : use.kind === 'logs' ? 'logs' : /database/.test(use.label) ? 'frame' : use.label === 'Installed modules' ? 'modules' : 'other'
     bytes[key] += use.bytes
     if (key === 'other' && use.bytes > 0) others.push(use.label.toLowerCase())
   }
@@ -218,7 +215,8 @@ export function diskSegments(disk: Disk): Segment[] {
     .filter((key) => bytes[key] > 0)
     .map((key) => ({
       key,
-      label: key === 'other' && others.length ? `Other (${others.join(', ')})` : NAMES[key].label,
+      label: key === 'other' && others.length ? `Other Kehikot files (${others.join(', ')})` : NAMES[key].label,
+      name: NAMES[key].name,
       short: NAMES[key].short,
       bytes: bytes[key],
       fraction: bytes[key] / total,
@@ -226,15 +224,37 @@ export function diskSegments(disk: Disk): Segment[] {
     .sort((a, b) => b.bytes - a.bytes)
 }
 
+/** The tooltip: "120 GB · 94%", what it is, and what the share is of. */
 export function segmentTip(one: Segment): Tip {
-  return { value: `${sizeSaid(one.bytes)} · ${percent(one.fraction)}`, detail: one.short, note: '' }
+  return { value: `${sizeSaid(one.bytes)} · ${percent(one.fraction)}`, detail: clip(one.name), note: SHARE_OF }
 }
 
-/** The doughnut as a sentence: every segment and its size. */
+/** One consumer in a line: "Agent worktrees (code copies agents work in) · 120 GB · 94%". */
+export const segmentSaid = (one: Segment): string => `${one.label} · ${sizeSaid(one.bytes)} · ${percent(one.fraction)}`
+
+/** The doughnut as a sentence: every segment, its size and its share of what Kehikot uses. */
 export function segmentsSaid(segments: readonly Segment[]): string {
   if (!segments.length) return 'Kehikot’s folders are being measured.'
   const total = segments.reduce((sum, one) => sum + one.bytes, 0)
-  return `Kehikot takes ${sizeSaid(total)}: ${segments.map((one) => `${one.label} ${sizeSaid(one.bytes)}`).join(', ')}.`
+  return `Kehikot uses ${sizeSaid(total)}. Each share is ${SHARE_OF}, not of the disk: ${segments.map(segmentSaid).join('; ')}.`
+}
+
+/** How much of what Kehikot uses is agent worktrees, when that is most of it. */
+export const WORKTREES_DOMINATE = 0.5
+
+/** The quiet hint for a disk that agent worktrees fill; '' when they do not. The path is the host's: Settings, About, its worktree cleanup. */
+export function cleanupHint(segments: readonly Segment[]): string {
+  const share = segments.find((one) => one.key === 'worktrees')?.fraction ?? 0
+  return share > WORKTREES_DOMINATE ? 'Most of this is agent worktrees; finished ones can be cleaned up in Settings › About › Clean up finished worktrees.' : ''
+}
+
+/** The Disk tile's two lines: what the number is, and what is left. Low space leads with how full the disk is. */
+export function diskWords(disk: Disk, segments: readonly Segment[], low: boolean): { value: string; sub: string } {
+  const used = segments.reduce((sum, one) => sum + one.bytes, 0)
+  const free = disk.free === null ? null : `${sizeSaid(disk.free)} free`
+  if (disk.free === null || !disk.total) return { value: used ? `Kehikot uses ${sizeSaid(used)}` : '—', sub: used ? 'free space unknown' : 'measuring' }
+  if (low) return { value: `Disk ${percent(1 - disk.free / disk.total)} full`, sub: `${free}${used ? ` · Kehikot uses ${sizeSaid(used)}` : ''}` }
+  return { value: used ? `Kehikot uses ${sizeSaid(used)}` : `${free}`, sub: used ? `${free} on this disk` : `of ${sizeSaid(disk.total)}` }
 }
 
 /**

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
 
-import { parseListeners, parsePs, startsIn, treeOf, unexplained, type Disk, type DiskUse, type ModuleHealth, type Point, type Proc, type Snapshot, type Starts } from '../src/health/model.ts'
+import { crashesIn, parseListeners, parsePs, treeOf, type Disk, type DiskUse, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
 
 /**
  * The health of the processes Kehikot runs on this computer, sampled by Monitor's server.
@@ -24,7 +24,7 @@ import { parseListeners, parsePs, startsIn, treeOf, unexplained, type Disk, type
  *   which pid answers on each registered port.
  * - The registry's file names and each one's `url` (the port), every `REGISTRY_MS`.
  * - Each module's log under the logs folder, every `LOGS_MS` and only when its size or time
- *   changed: the host's start markers and crash lines (`startsIn`). Nothing else of it is kept.
+ *   changed: the host's start markers and crash lines (`crashesIn`). Nothing else of it is kept.
  * - Sizes, every `DISK_MS`: `df` for the home folder's disk, `stat` for frame.sqlite, `du` at the
  *   lowest priority for the installed modules, versions and logs; agent worktrees are counted
  *   every time and summed every `WORKTREES_MS`. Sizes only:
@@ -209,7 +209,7 @@ export class Sampler {
   private trees = new Map<string, number>()
   private selfPoint: Point | null = null
 
-  private logs = new Map<string, { size: number; mtime: number; starts: Starts }>()
+  private logs = new Map<string, { size: number; mtime: number; crashes: number[] }>()
   private logsAt = 0
 
   private disk: Disk = { at: null, free: null, total: null, uses: [], why: '' }
@@ -351,7 +351,7 @@ export class Sampler {
       if (held && held.size === stat.size && held.mtime === stat.mtimeMs) continue
       try {
         /* The host bounds each log to 512 KiB; only the markers and crash lines are looked at. */
-        this.logs.set(id, { size: stat.size, mtime: stat.mtimeMs, starts: startsIn(readFileSync(file, 'utf8'), stat.mtimeMs) })
+        this.logs.set(id, { size: stat.size, mtime: stat.mtimeMs, crashes: crashesIn(readFileSync(file, 'utf8'), stat.mtimeMs) })
       } catch {
         this.logs.delete(id)
       }
@@ -383,7 +383,7 @@ export class Sampler {
       why.push('the free space of the disk')
     }
     const frame = sizeOf(where.frame) + sizeOf(`${where.frame}-wal`) + sizeOf(`${where.frame}-shm`)
-    if (frame) uses.push({ label: 'Kehikot’s database (frame.sqlite)', kind: 'kehikot', bytes: frame })
+    if (frame) uses.push({ label: 'Kehikot’s database', kind: 'kehikot', bytes: frame })
     for (const one of [
       { path: where.installed, label: 'Installed modules', kind: 'kehikot' as const },
       { path: where.versions, label: 'Kept versions', kind: 'kehikot' as const },
@@ -436,12 +436,8 @@ export class Sampler {
   private said(): Snapshot {
     const now = this.deps.now()
     const day = (times: readonly number[] | undefined) => times?.filter((at) => at >= now - DAY_MS) ?? []
-    const every = [...this.logs].map(([id, held]) => ({ id, starts: held.starts }))
     const modules: ModuleHealth[] = [...this.modules].map(([id, port]) => {
       const points = this.rings.get(id) ?? []
-      const log = this.logs.get(id)?.starts
-      const starts = day(log?.starts)
-      const crashes = day(log?.crashes)
       return {
         id,
         port,
@@ -449,13 +445,7 @@ export class Sampler {
         procs: this.trees.get(id) ?? 0,
         now: points.at(-1) ?? null,
         points,
-        starts: starts.length,
-        crashes: crashes.length,
-        updates: day(log?.updates).length,
-        startedAt: log?.starts.at(-1) ?? null,
-        crashedAt: crashes,
-        /* Other modules' starts tell Kehikot's own starts (the app starting, restarting to update) from this module's. */
-        unexplainedAt: log ? day(unexplained(log, every.filter((one) => one.id !== id).map((one) => one.starts))) : [],
+        crashedAt: day(this.logs.get(id)?.crashes),
       }
     })
     return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, disk: this.disk, self: this.selfPoint, why: this.why }

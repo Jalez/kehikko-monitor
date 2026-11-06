@@ -6,7 +6,7 @@ import { Cover, coverFor, useKept, useServerStanding } from 'kehikot-module-prot
 import { HeaderMenus } from '@/components/header-menus'
 import { footerItems } from '@/footer'
 import { VIEWS, headerItems, pressed, type HeaderState, type View } from '@/header'
-import { emptySnapshot, judged as judge, latencies as latenciesOf } from '@/health/model'
+import { emptySnapshot, judged as judge } from '@/health/model'
 import { budgetLines } from '@/traffic/budgets'
 import { RANGES, STYLES, callerOf, colourOrder, repeats, summary, type Caller, type Filter, type Range, type Repeat, type Style } from '@/traffic/model'
 import { useKehikot, type Host } from '@/wire/use-kehikot'
@@ -138,9 +138,7 @@ export function Screen({
   const now = given ?? traffic.at ?? Date.now()
   const found = useMemo(() => repeats(traffic.calls, now), [traffic.calls, now])
   const rows = useMemo(() => summary(traffic.calls, now), [traffic.calls, now])
-  const ports = useMemo(() => new Map(health.snapshot.modules.flatMap((m) => (m.port === null ? [] : [[m.id, m.port] as [string, number]]))), [health.snapshot])
-  const lat = useMemo(() => latenciesOf(traffic.calls, now, ports), [traffic.calls, now, ports])
-  const ranked = useMemo(() => judge(health.snapshot, lat, now), [health.snapshot, lat, now])
+  const ranked = useMemo(() => judge(health.snapshot, now), [health.snapshot, now])
 
   /*
    * The footer the host draws, when it draws one (2.38.0): live or paused, the rate, repeats, the
@@ -172,7 +170,7 @@ export function Screen({
         {cover ? (
           <Cover state={cover} name="Monitor" onRetry={() => setAgain((n) => n + 1)} />
         ) : state.view === 'health' ? (
-          <HealthView snapshot={health.snapshot} judged={ranked} latencies={lat} problem={health.problem} now={now} />
+          <HealthView snapshot={health.snapshot} judged={ranked} problem={health.problem} now={now} />
         ) : traffic.problem && !traffic.calls.length ? (
           <p className="text-muted-foreground rounded-md border p-3 text-xs" role="status">
             {traffic.problem}
