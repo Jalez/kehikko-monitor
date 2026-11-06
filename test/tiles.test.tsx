@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 
-import { judged, type CallerLatency } from '../src/health/model.ts'
+import { judged } from '../src/health/model.ts'
 import { HealthView } from '../src/view/health.tsx'
 import {
   AXES_HEIGHT,
@@ -11,7 +11,6 @@ import {
   RING_WIDE,
   SPARK_HEIGHT,
   TIP_LINE_MAX,
-  callsTip,
   centreLabel,
   clip,
   clock,
@@ -21,10 +20,12 @@ import {
   indexAt,
   memoryTip,
   niceTop,
-  restartsTip,
   segmentAt,
   segmentTip,
   segmentsSaid,
+  cleanupHint,
+  diskWords,
+  segmentSaid,
   stepped,
   tileLayout,
   tipAlign,
@@ -44,26 +45,28 @@ import { snapshotOf } from './health-fixtures.ts'
 afterEach(cleanup)
 
 const NOW = 2_000_000_000
-const latency: CallerLatency = { by: 'kehikot.kanban', timed: 10, calls: 10, errors: 1, p50: 400, p95: 2500, answered: null }
 
 describe('the layout at each width', () => {
-  test('200 and 240 px: one compact column of sparklines; 280 and 320: axes and a taller plot; three columns are sparklines again', () => {
+  test('200 and 240 px: one compact column of sparklines; 280 and 320: axes and a taller plot; two and three columns are sparklines again', () => {
     expect(tileLayout(200)).toEqual({ columns: 1, tile: 200, axes: false, plot: SPARK_HEIGHT, ring: RING_MID, legend: true, compact: true })
     expect(tileLayout(240)).toMatchObject({ columns: 1, axes: false, plot: SPARK_HEIGHT, compact: true })
     expect(tileLayout(280)).toEqual({ columns: 1, tile: 280, axes: true, plot: AXES_HEIGHT, ring: RING_WIDE, legend: true, compact: true })
     expect(tileLayout(320)).toMatchObject({ columns: 1, axes: true, plot: AXES_HEIGHT })
-    /* Three columns: the tiles are 1 px apart, and the disk takes two cells, so its list fits beside it. */
-    expect(tileLayout(400)).toMatchObject({ columns: 3, tile: 132, axes: false, legend: true, ring: RING_MID, compact: false })
-    expect(tileLayout(700)).toMatchObject({ columns: 5, tile: 139, axes: false, legend: false, ring: SPARK_HEIGHT })
+    /* Two columns: CPU and Memory side by side, the disk across the whole row below with its list beside it. */
+    expect(tileLayout(400)).toMatchObject({ columns: 2, tile: 199, axes: false, legend: true, ring: RING_MID, compact: false })
+    expect(tileLayout(620)).toMatchObject({ columns: 2, tile: 309, axes: true, legend: true, ring: RING_WIDE })
+    /* Three side by side from 640 px; the disk has a tile of its own, wide enough for its list. */
+    expect(tileLayout(700)).toMatchObject({ columns: 3, tile: 232, axes: false, legend: true, ring: RING_MID, compact: false })
+    expect(tileLayout(1000)).toMatchObject({ columns: 3, axes: true })
     expect(tileLayout(null)).toMatchObject({ tile: null, axes: false, plot: SPARK_HEIGHT })
   })
 
-  test('one column at 200–320 px stands no taller than it needs: 420 px at 240 (it was 542 with cards and gaps)', () => {
-    /* Four rows of 6 + 20 + 2 + 44 + 6, the disk's row as tall as its five-line list, and four hairlines. */
-    expect(columnHeight(tileLayout(240), 5)).toBe(420)
-    expect(columnHeight(tileLayout(200), 5)).toBe(420)
+  test('one column at 200–320 px stands no taller than it needs: 262 px at 240', () => {
+    /* Two rows of 6 + 20 + 2 + 44 + 6, the disk's row as tall as its five-line list, and two hairlines. */
+    expect(columnHeight(tileLayout(240), 5)).toBe(262)
+    expect(columnHeight(tileLayout(200), 5)).toBe(262)
     /* With axes the plots are 72 and the doughnut 88, its list beside it shorter than it. */
-    expect(columnHeight(tileLayout(280), 5)).toBe(4 * (6 + 20 + 2 + 72 + 6) + (6 + 20 + 2 + 88 + 6) + 4)
+    expect(columnHeight(tileLayout(280), 5)).toBe(2 * (6 + 20 + 2 + 72 + 6) + (6 + 20 + 2 + 88 + 6) + 2)
     expect(columnHeight(tileLayout(320), 3)).toBe(columnHeight(tileLayout(280), 3))
   })
 
@@ -113,22 +116,13 @@ describe('what each tooltip says', () => {
     expect(memoryTip({ at: NOW, rss: 960e6 }, 0).detail).toBe('')
   })
 
-  test('a caller’s calls and a module’s starts: the figure, whose, and the failures', () => {
-    expect(callsTip({ ...latency, p95: 2500 })).toEqual({ value: '2.5 s p95', detail: 'Kanban', note: '1 of 10 failed' })
-    expect(restartsTip({ id: 'kehikot.diff', starts: 3, crashes: 1 })).toEqual({ value: '3 starts', detail: 'Diff', note: '1 after a crash' })
-    expect(restartsTip({ id: 'kehikot.diff', starts: 1, crashes: 0 })).toEqual({ value: '1 start', detail: 'Diff', note: 'no crash' })
-  })
-
   test('every tooltip is three short lines at most, however large the figures and long the names', () => {
-    const long = 'kehikot.a-module-with-a-very-long-name-indeed'
     const tips: Tip[] = [
       cpuTip({ at: NOW, cpu: 12.345 }, 128),
       cpuTip({ at: NOW, cpu: 0 }, 8),
       memoryTip({ at: NOW, rss: 123.4e9 }, 1024e9),
       memoryTip({ at: NOW, rss: 1 }, 0),
-      callsTip({ by: long, p95: 123_456, calls: 99_999, errors: 99_999 }),
-      restartsTip({ id: long, starts: 1234, crashes: 1234 }),
-      ...diskSegments({ ...snapshotOf(NOW).disk, uses: [{ label: 'Kehikot’s database (frame.sqlite)', kind: 'kehikot', bytes: 999e9 }, { label: 'Installed modules', kind: 'kehikot', bytes: 1 }] }).map(segmentTip),
+      ...diskSegments({ ...snapshotOf(NOW).disk, uses: [{ label: 'Kehikot’s database', kind: 'kehikot', bytes: 999e9 }, { label: 'Installed modules', kind: 'kehikot', bytes: 1 }] }).map(segmentTip),
     ]
     for (const one of tips) {
       const lines = tipLines(one)
@@ -142,7 +136,7 @@ describe('what each tooltip says', () => {
 
   test('the disk: one segment per consumer, the biggest first, each named with its size', () => {
     const disk = { ...snapshotOf(NOW).disk }
-    disk.uses = [...disk.uses, { label: 'Kehikot’s database (frame.sqlite)', kind: 'kehikot', bytes: 40e6 }, { label: 'Kept versions', kind: 'kehikot', bytes: 1e9 }, { label: '~/x/worktrees', kind: 'worktrees', bytes: 5e9, count: 2, withModules: 1 }]
+    disk.uses = [...disk.uses, { label: 'Kehikot’s database', kind: 'kehikot', bytes: 40e6 }, { label: 'Kept versions', kind: 'kehikot', bytes: 1e9 }, { label: '~/x/worktrees', kind: 'worktrees', bytes: 5e9, count: 2, withModules: 1 }]
     const segments = diskSegments(disk)
     expect(segments.map((one) => [one.key, one.bytes])).toEqual([
       ['worktrees', 125e9],
@@ -151,9 +145,11 @@ describe('what each tooltip says', () => {
       ['frame', 40e6],
       ['logs', 2e6],
     ])
-    expect(segments[2]?.label).toBe('Other (kept versions)')
-    expect(segmentTip(segments[0]!)).toEqual({ value: '125 GB · 97%', detail: 'Worktrees', note: '' })
-    expect(segmentsSaid(segments)).toContain('Agent worktrees 125 GB, Installed modules 3 GB')
+    expect(segments[2]?.label).toBe('Other Kehikot files (kept versions)')
+    expect(segmentTip(segments[0]!)).toEqual({ value: '125 GB · 97%', detail: 'Agent worktrees', note: 'of what Kehikot uses' })
+    expect(segmentSaid(segments[0]!)).toBe('Agent worktrees (code copies agents work in) · 125 GB · 97%')
+    expect(segmentSaid(segments[3]!)).toBe('Kehikot’s database · 40 MB · 0%')
+    expect(segmentsSaid(segments)).toContain('Kehikot uses 129 GB. Each share is of what Kehikot uses, not of the disk: Agent worktrees (code copies agents work in) · 125 GB · 97%; Installed modules · 3 GB · 2%')
     expect(diskSegments({ ...disk, uses: [] })).toEqual([])
   })
 
@@ -166,10 +162,27 @@ describe('what each tooltip says', () => {
   })
 })
 
+describe('the Disk tile says what its numbers are', () => {
+  const disk = snapshotOf(NOW).disk
+  const segments = diskSegments(disk)
+
+  test('the headline is what Kehikot uses and what is free; a low disk leads with how full it is', () => {
+    expect(diskWords(disk, segments, false)).toEqual({ value: 'Kehikot uses 123 GB', sub: '60 GB free on this disk' })
+    expect(diskWords({ ...disk, free: 40e9 }, segments, true)).toEqual({ value: 'Disk 92% full', sub: '40 GB free · Kehikot uses 123 GB' })
+    expect(diskWords({ ...disk, free: null }, [], false)).toEqual({ value: '—', sub: 'measuring' })
+  })
+
+  test('worktrees dominating say where to clean up, with the host’s own menu path; nothing otherwise', () => {
+    expect(cleanupHint(segments)).toBe('Most of this is agent worktrees; finished ones can be cleaned up in Settings › About › Clean up finished worktrees.')
+    expect(cleanupHint(diskSegments({ ...disk, uses: [{ label: 'Logs', kind: 'logs', bytes: 5 }, { label: '~/x-worktrees', kind: 'worktrees', bytes: 1 }] }))).toBe('')
+    expect(cleanupHint([])).toBe('')
+  })
+})
+
 describe('the tiles drawn at each width', () => {
   const draw = (width: number) => {
     const snapshot = snapshotOf(NOW)
-    return render(<HealthView snapshot={snapshot} judged={judged(snapshot, [latency], NOW)} latencies={[latency]} problem={null} now={NOW} box={{ width, height: 600 }} />)
+    return render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} box={{ width, height: 600 }} />)
   }
 
   for (const [width, axes, height] of [
@@ -182,7 +195,7 @@ describe('the tiles drawn at each width', () => {
       draw(width)
       expect(screen.getByTestId('tiles').getAttribute('data-axes')).toBe(String(axes))
       expect(screen.getByTestId('tiles').getAttribute('data-compact')).toBe('true')
-      for (const id of ['tile-cpu', 'tile-memory', 'tile-calls', 'tile-restarts']) {
+      for (const id of ['tile-cpu', 'tile-memory']) {
         const tile = screen.getByTestId(id)
         const [head, plot, more] = [...tile.children] as HTMLElement[]
         expect(head?.getAttribute('data-testid')).toBe(`${id}-head`)
@@ -213,7 +226,7 @@ describe('the tiles drawn at each width', () => {
     }
   })
 
-  test('three columns: the words go under the title, the disk takes two cells with its list beside it; five: for screen readers only', () => {
+  test('two columns: the words go under the title, the disk takes the row below with its list beside it; three: its list is still there', () => {
     draw(400)
     expect(screen.getByTestId('tiles').getAttribute('data-compact')).toBe('false')
     const [head, sub, plot] = [...screen.getByTestId('tile-cpu').children] as HTMLElement[]
@@ -222,10 +235,18 @@ describe('the tiles drawn at each width', () => {
     expect(plot?.getAttribute('data-testid')).toBe('tile-cpu-plot')
     expect(screen.getByTestId('tile-disk').className).toContain('@min-[360px]:col-span-2')
     expect(screen.getByTestId('tile-disk-segments').className).not.toContain('sr-only')
+    expect(screen.getByTestId('tiles').className).toContain('@min-[360px]:grid-cols-2')
+    expect(screen.getByTestId('tiles').className).toContain('@min-[640px]:grid-cols-3')
+    expect(screen.getByTestId('tile-disk-segments').textContent).toContain('Agent worktrees (code copies agents work in)120 GB · 98%')
+    expect(screen.getByTestId('tile-disk-value').textContent).toBe('Kehikot uses 123 GB')
+    expect(screen.getByTestId('tile-disk').textContent).toContain('60 GB free on this disk')
+    expect(screen.getByTestId('tile-disk-hint').textContent).toContain('Settings › About › Clean up finished worktrees')
     cleanup()
     draw(700)
-    expect(screen.getByTestId('tile-disk-segments').className).toContain('sr-only')
-    expect(screen.getByTestId('tile-disk-segments').textContent).toContain('Agent worktrees120 GB')
+    expect(screen.getByTestId('tile-disk-segments').className).not.toContain('sr-only')
+    expect(screen.getByTestId('tile-disk').className).toContain('@min-[640px]:col-span-1')
+    expect(screen.queryByTestId('tile-calls')).toBeNull()
+    expect(screen.queryByTestId('tile-restarts')).toBeNull()
   })
 
   test('the doughnut’s row is as tall as its list, so neither is cut off', () => {
@@ -237,10 +258,10 @@ describe('the tiles drawn at each width', () => {
 
   test('long words truncate, with the whole of them as a tooltip', () => {
     draw(200)
-    const sub = within(screen.getByTestId('tile-disk')).getByText('40 worktrees, 30 with node_modules')
+    const sub = within(screen.getByTestId('tile-disk')).getByText('60 GB free on this disk')
     expect(sub.className).toContain('truncate')
-    expect(sub.getAttribute('title')).toBe('40 worktrees, 30 with node_modules')
-    expect(within(screen.getByTestId('tile-disk-segments')).getByTitle('Agent worktrees')).toBeTruthy()
+    expect(sub.getAttribute('title')).toBe('60 GB free on this disk')
+    expect(within(screen.getByTestId('tile-disk-segments')).getByTitle('Agent worktrees (code copies agents work in)')).toBeTruthy()
   })
 })
 
@@ -250,7 +271,7 @@ describe('the tooltip by keyboard', () => {
 
   test('Tab to CPU shows the latest point; ← moves back; Escape and leaving close it', () => {
     const snapshot = snapshotOf(NOW)
-    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[latency]} problem={null} now={NOW} box={{ width: 240, height: 600 }} />)
+    render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} box={{ width: 240, height: 600 }} />)
     const cpu = plotOf('tile-cpu')
     expect(cpu.tabIndex).toBe(0)
     expect(tip('tile-cpu').textContent).toBe('')
@@ -277,21 +298,16 @@ describe('the tooltip by keyboard', () => {
     expect(tip('tile-cpu').textContent).toBe('')
   })
 
-  test('memory, calls, restarts and each disk segment say their numbers', () => {
+  test('memory and each disk segment say their numbers, and what the share is of', () => {
     const snapshot = snapshotOf(NOW)
-    render(<HealthView snapshot={snapshot} judged={judged(snapshot, [], NOW)} latencies={[latency]} problem={null} now={NOW} box={{ width: 320, height: 600 }} />)
+    render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} box={{ width: 320, height: 600 }} />)
     fireEvent.focus(plotOf('tile-memory'))
     expect(tip('tile-memory').textContent).toBe(`960 MB6% of 16 GB${clock(NOW)}`)
-    fireEvent.focus(plotOf('tile-calls'))
-    expect(tip('tile-calls').textContent).toBe('2.5 s p95Kanban1 of 10 failed')
-    fireEvent.focus(plotOf('tile-restarts'))
-    fireEvent.keyDown(plotOf('tile-restarts'), { key: 'Home' })
-    expect(tip('tile-restarts').textContent).toBe('3 startsDiff1 after a crash')
     const disk = plotOf('tile-disk')
     fireEvent.focus(disk)
-    expect(tip('tile-disk').textContent).toBe('120 GB · 98%Worktrees')
+    expect(tip('tile-disk').textContent).toBe('120 GB · 98%Agent worktreesof what Kehikot uses')
     fireEvent.keyDown(disk, { key: 'ArrowRight' })
-    expect(tip('tile-disk').textContent).toBe('3 GB · 2%Modules')
-    expect(disk.getAttribute('aria-label')).toContain('Kehikot takes 123 GB: Agent worktrees 120 GB, Installed modules 3 GB, Logs 2 MB.')
+    expect(tip('tile-disk').textContent).toBe('3 GB · 2%Installed modulesof what Kehikot uses')
+    expect(disk.getAttribute('aria-label')).toContain('Kehikot uses 123 GB. Each share is of what Kehikot uses, not of the disk: Agent worktrees (code copies agents work in) · 120 GB · 98%')
   })
 })

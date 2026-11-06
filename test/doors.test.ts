@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { skillPath, skillTextIssue } from 'kehikot-module-protocol'
 
-import { ASK, CLOCK, HEALTH, MANIFEST, answer, callerNamed, servingAt, trafficSaid } from '../doors.ts'
+import { ASK, CLOCK, HEALTH, MANIFEST, answer, callerNamed, servingAt, tools, trafficSaid } from '../doors.ts'
 import { snapshotOf } from './health-fixtures.ts'
 import { ID } from '../manifest.ts'
 import { call, polling } from './fixtures.ts'
@@ -59,26 +59,34 @@ describe('the doors', () => {
     expect((await answer('POST', '/api/health', none, {}, null))?.status).toBe(405)
   })
 
-  test('health says what is slow or heavy, the worst first, with call times from the host’s record', async () => {
+  test('health says what is heavy, the worst first, a crash and the disk in words; nothing of calls or restarts', async () => {
     refusal = null
+    asked.length = 0
     HEALTH.snapshot = async () => snapshotOf(NOW)
     const said = (await rpc('tools/call', { name: 'health', arguments: {} })).result.content![0]!.text
     expect(said).toContain('Worth a look, the worst first:')
     expect(said.indexOf('Diff: crashed in the last hour')).toBeLessThan(said.indexOf('Kanban'))
     expect(said).toContain('Kanban: 120% CPU')
+    expect(said).toContain('Diff crashed in the last hour.')
     expect(said).toContain('Monitor itself')
-    const calls = (await rpc('tools/call', { name: 'health', arguments: { view: 'calls' } })).result.content![0]!.text
-    expect(calls).toContain('Kanban: made')
+    expect(said).not.toMatch(/restart|p95|call times/i)
     const disk = (await rpc('tools/call', { name: 'health', arguments: { view: 'disk' } })).result.content![0]!.text
-    expect(disk).toContain('40 worktrees, 30 with node_modules')
+    expect(disk).toContain('40 agent worktrees, 30 with node_modules')
+    expect(disk).toContain('Agent worktrees (code copies agents work in) · 120 GB · 98%')
+    expect(disk).toContain('Each share is of what Kehikot uses, not of the disk.')
+    expect(disk).toContain('Settings › About › Clean up finished worktrees')
+    /* Health reads no traffic record any more. */
+    expect(asked).toHaveLength(0)
   })
 
-  test('health still answers when the host keeps no record: only the call times are missing', async () => {
-    refusal = { reason: 'unknown-method', error: 'traffic.read is not one of them' }
+  test('the calls and restarts views are not tracked any more, and say so in a line', async () => {
     HEALTH.snapshot = async () => snapshotOf(NOW)
-    const said = (await rpc('tools/call', { name: 'health', arguments: { view: 'calls' } })).result.content![0]!.text
-    expect(said).toContain('call times are missing')
-    refusal = null
+    const tool = tools().find((one) => one.name === 'health')!
+    expect((tool.inputSchema.properties.view as { enum: string[] }).enum).toEqual(['now', 'processes', 'disk'])
+    const calls = (await rpc('tools/call', { name: 'health', arguments: { view: 'calls' } })).result.content![0]!.text
+    expect(calls).toBe('Health no longer tracks call times or failures. The traffic tool has the calls.')
+    const restarts = (await rpc('tools/call', { name: 'health', arguments: { view: 'restarts' } })).result.content![0]!.text
+    expect(restarts).toContain('no longer tracks restarts')
   })
 
   test('traffic reads the host’s record as Monitor, about no project, and says what repeats', async () => {

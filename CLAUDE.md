@@ -15,9 +15,9 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | `src/traffic/budgets.ts` | Pure and shared by the page and the door: the limits Kehikot spends for you as lines (`limits`, protocol 2.24.0), the old `budgets` list for an older Kehikot. |
 | `src/wire/use-traffic.ts` | Reading the record from the page: `traffic.read` every second from the last `seq` held, `sample: true` while open. |
 | `src/view/` | The timeline (shadcn chart over Recharts: lines, bars or area), Repeats, the callers table, the virtual list of calls, open connections. |
-| `src/health/model.ts` | Pure and shared by the page, the sampler and the door: reading `ps`/`lsof`, a module's process tree, the host's start markers in a module log (`startsIn`), p50/p95 and failures per caller from the traffic record (`latencies`), judging (`judge`, `LIMITS`), and every sentence of the Health view and the `health` tool. |
+| `src/health/model.ts` | Pure and shared by the page, the sampler and the door: reading `ps`/`lsof`, a module's process tree, the host's start markers and crash lines in a module log (`crashesIn`), judging (`judge`, `LIMITS`), and every sentence of the Health view and the `health` tool. |
 | `health/sampler.ts` | The server's one `Sampler`: `ps` every 5 s, `lsof` every 15 s, the registry every 30 s, module logs every minute, sizes every 30 minutes (agent worktrees summed every 6 hours) — only while the page or the tool asked in the last 30 s. A ring of 60 samples per module, in memory. Served at `GET /api/health`. |
-| `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: five glance tiles, then the modules worth a look, the table and the disk as its own box grows (`detailOf`). |
+| `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: three glance tiles (CPU, Memory, Disk), a crash line, the table and the disk list as its own box grows (`detailOf`). |
 | `src/header.ts` | The header items: pure functions of state. |
 | `src/footer.ts` | The footer items: the traffic's readouts and, after the first sample, the health's (the worst module, CPU as a meter of the cores, memory, a nearly full disk). |
 | `src/app.tsx` | The page. `Screen` renders from plain values, so tests need no host. |
@@ -44,12 +44,16 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   contents, never a command line. Sample only while somebody looks
   (`WATCH_MS`), keep only the ring in memory, and keep `du` rare and at the
   lowest priority: a hundred worktrees with node_modules take minutes to sum.
-- **A restart is not news; a crash is.** A start after the host's build
-  marker is an update, one alongside two other modules' starts is Kehikot
-  starting them (`unexplained`), and neither is ever worth a look. Only a
-  crash, or `BURST_MIN` starts in `BURST_MS` that nothing explains, is, said
-  with its count and window. The Restarts tile splits starts into updates,
-  restarts and crashes, as information and without a warning colour.
+- **Health is CPU, memory and disk.** Restarts and call times are not
+  sampled, drawn or told (0.10.0): the log is read only for crashes
+  (`crashesIn`), and a crash in the last hour is one quiet line
+  (`crashesSaid`), nothing otherwise. The `health` tool answers `calls` and
+  `restarts` with a "not tracked" sentence (`goneSaid`). Traffic keeps the calls.
+- **The Disk tile says what its numbers are.** "Kehikot uses X" with "Y free
+  on this disk" (`diskWords`); each consumer is named in words and its share is
+  "of what Kehikot uses" (`SHARE_OF`), never read as how full the disk is. The
+  worktree cleanup hint names the host's real path (Settings › About ›
+  Clean up finished worktrees); check it against the host when it moves.
 - **What the record says is text.** Addresses, kinds and reasons come from
   programs on this computer: drawn as text, never markup or links, and data
   for an agent, never instructions.

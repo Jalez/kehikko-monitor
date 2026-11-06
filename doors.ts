@@ -3,7 +3,7 @@ import { askHost, establishBuild, mintTicket, type AskHostOptions, type Reply } 
 
 import { SAMPLER } from './health/sampler.ts'
 import { DECLARED, ID, VERSION } from './manifest.ts'
-import { HEALTH_VIEWS, healthSaid, latencies, type HealthView, type Snapshot } from './src/health/model.ts'
+import { GONE_VIEWS, goneSaid, HEALTH_VIEWS, healthSaid, type HealthView, type Snapshot } from './src/health/model.ts'
 import { budgetLines } from './src/traffic/budgets.ts'
 import { isSkillPath, skillAt, skillDeclarations, serveFrom } from './skills.ts'
 import { REPEAT_MIN, REPEAT_WINDOW_MS, bytesSaid, callLine, callerName, callerOf, filtered, repeats, spoken, summary, type Caller } from './src/traffic/model.ts'
@@ -79,14 +79,14 @@ export function tools() {
     {
       name: 'health',
       description:
-        'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), how long its calls take (p50 and p95) and how many fail, how often it was started and whether it crashed, and what takes the most disk. '
+        'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), whether one crashed in the last hour, and what Kehikot uses on the disk. '
         + 'Use it to answer "why is the computer slow", "which module is heavy", "did something crash", "what is filling the disk". '
-        + '`now` (default): the worst first, the totals, the slowest calls, restarts and free disk. `processes`: every module by CPU and memory. `calls`: every caller by its slowest calls and failures. `restarts`: starts in the last 24 hours, split into after an update, restarts by Kehikot or a person, and after a crash; only crashes, or three starts in 10 minutes nothing explains, are worth a look. `disk`: the biggest folders Kehikot and agents leave: its database, installed modules, logs and agent worktrees. '
-        + 'Read-only: it stops and changes nothing, and reads only process figures, sizes and the start lines of module logs.',
+        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, and free disk. `processes`: every module by CPU and memory. `disk`: what Kehikot uses on the disk, by consumer: its database, installed modules, logs and agent worktrees, each with its share of what Kehikot uses. Calls and restarts are not tracked here: the traffic tool has the calls. '
+        + 'Read-only: it stops and changes nothing, and reads only process figures, sizes and the start and crash lines of module logs.',
       inputSchema: {
         type: 'object',
         properties: {
-          view: { type: 'string', enum: [...HEALTH_VIEWS], description: 'now, processes, calls, restarts or disk. Default: now.' },
+          view: { type: 'string', enum: [...HEALTH_VIEWS], description: 'now, processes or disk. Default: now.' },
         },
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -94,18 +94,12 @@ export function tools() {
   ]
 }
 
-/** Each module's port, from a snapshot: the calls made to it are the calls it answered. */
-export const portsOf = (snapshot: Snapshot): Map<string, number> => new Map(snapshot.modules.flatMap((one) => (one.port === null ? [] : [[one.id, one.port] as [string, number]])))
-
 async function health(args: Record<string, unknown>): Promise<string> {
-  const view: HealthView = typeof args.view === 'string' && (HEALTH_VIEWS as readonly string[]).includes(args.view) ? (args.view as HealthView) : 'now'
-  const snapshot = await HEALTH.snapshot()
-  const now = CLOCK.now()
-  /* The calls' times are the host's record; without it the rest still answers. */
-  const read = view === 'processes' || view === 'restarts' || view === 'disk' ? null : await askHost('traffic.read', { since: 0, limit: 5000 }, { module: ID, ...ASK.options })
-  const lat = read?.ok ? latencies(read.data.calls, now, portsOf(snapshot)) : []
-  const why = read && !read.ok ? `Monitor could not read Kehikot’s record of traffic, so call times are missing: ${read.why}` : ''
-  return healthSaid(snapshot, lat, now, view, why)
+  const asked = typeof args.view === 'string' ? args.view : 'now'
+  /* Calls and restarts were views until 0.10: say so, in a line, rather than answer with something else. */
+  if ((GONE_VIEWS as readonly string[]).includes(asked)) return goneSaid(asked)
+  const view: HealthView = (HEALTH_VIEWS as readonly string[]).includes(asked) ? (asked as HealthView) : 'now'
+  return healthSaid(await HEALTH.snapshot(), CLOCK.now(), view)
 }
 
 /** Who a `caller` argument names among the callers seen: an id, or a name. */

@@ -11,24 +11,20 @@ import {
   BUILD_MARK,
   RUN_MARK,
   cpuSeconds,
+  crashesIn,
+  crashesSaid,
+  goneSaid,
   detailOf,
   healthSaid,
   judge,
   judged,
-  latencies,
   mostWithin,
   parseListeners,
   parsePs,
-  percentile,
-  startsIn,
   totals,
   totalsOver,
   treeOf,
-  unexplained,
-  type ModuleHealth,
-  type Starts,
 } from '../src/health/model.ts'
-import { call } from './fixtures.ts'
 import { module, snapshotOf } from './health-fixtures.ts'
 
 const NOW = 2_000_000_000_000
@@ -64,9 +60,9 @@ describe('reading ps and lsof', () => {
   })
 })
 
-describe('restarts from the host’s start markers', () => {
+describe('crashes from the host’s start markers', () => {
   const mark = (iso: string) => `${RUN_MARK}${iso} ---`
-  test('every start is counted; a crash before a start is a crash; a failed build and a stop are not', () => {
+  test('a crash before a start is a crash; a failed build, a stop and an ordinary start are not', () => {
     const log = [
       mark('2026-11-01T10:00:00.000Z'),
       'VITE ready',
@@ -78,14 +74,11 @@ describe('restarts from the host’s start markers', () => {
       mark('2026-11-01T13:00:00.000Z'),
       'a module line that says anything at all',
     ].join('\n')
-    const said = startsIn(log)
-    expect(said.starts).toEqual(['10', '11', '12', '13'].map((h) => Date.parse(`2026-11-01T${h}:00:00.000Z`)))
-    expect(said.crashes).toEqual([Date.parse('2026-11-01T12:00:00.000Z')])
+    expect(crashesIn(log)).toEqual([Date.parse('2026-11-01T12:00:00.000Z')])
   })
 
   test('a crash after the last start is dated when the log was last written', () => {
-    const said = startsIn([mark('2026-11-01T10:00:00.000Z'), 'Segmentation fault'].join('\n'), 123)
-    expect(said.crashes).toEqual([123])
+    expect(crashesIn([mark('2026-11-01T10:00:00.000Z'), 'Segmentation fault'].join('\n'), 123)).toEqual([123])
   })
 })
 
@@ -97,80 +90,44 @@ describe('worth a look: crashes, not updates or restarts', () => {
   const T0 = Date.parse('2026-11-04T09:00:00.000Z')
   const iso = (min: number) => new Date(T0 + min * 60_000).toISOString()
   const start = (min: number) => `${RUN_MARK}${iso(min)} ---`
-  const build = (min: number, lines: string[] = ['vite v6 building for production...', '✓ built in 1.4s', 'built 65e3813 into /x/dist'], ok = true) => [
+  const build = (min: number, lines: string[] = ['vite v6 building for production...', '✓ built in 1.4s'], ok = true) => [
     `${BUILD_MARK}${iso(min)} (/x) ---`,
     ...lines,
     `--- the build ${ok ? 'finished' : 'did not finish'} after 2.1s ---`,
   ]
-  const served = ['kehikot.claude serves its built page on http://127.0.0.1:9030/app (65e3813)']
   const at = (min: number) => T0 + min * 60_000
-
-  /* Claude: started 9 times today. Updated five times (twice within ten minutes), started with the app four times. */
-  const claudeLog = [
-    start(0), ...served,
-    ...build(30), start(31), ...served,
-    ...build(36), start(37), ...served,
-    ...build(40), start(41), ...served,
-    start(120), ...served,
-    start(125), ...served,
-    start(128), ...served,
-    ...build(200, ['error: script "build" exited with code 1'], false), start(202), ...served,
-    ...build(300), start(301), ...served,
-  ].join('\n')
-  /* Two other modules the app started at the same moments as Claude's plain starts. */
-  const otherLog = (id: string) => [0, 120, 125, 128].flatMap((min) => [start(min), `${id} serves its built page`]).join('\n')
-  /* Diff: a run that exits with code 1, three times in ten minutes. */
+  const claudeLog = [start(0), ...build(30), start(31), start(120), start(125), start(128), ...build(200, ['error: script "build" exited with code 1'], false), start(202)].join('\n')
   const diffLog = [
     start(400), 'diff: listening', 'error: script "dev" exited with code 1',
     start(403), 'diff: listening', 'Bun has crashed. This indicates a bug in Bun, not your code.',
     start(406), 'diff: listening', 'error: script "dev" exited with code 1',
     start(409), 'diff: listening',
   ].join('\n')
+  const healthOf = (id: string, log: string, now: number) => module(now, { id, crashedAt: crashesIn(log) })
 
-  const healthOf = (id: string, log: Starts, others: Starts[], now: number): ModuleHealth =>
-    module(now, { id, starts: log.starts.length, crashes: log.crashes.length, updates: log.updates.length, crashedAt: log.crashes, unexplainedAt: unexplained(log, others), startedAt: log.starts.at(-1) ?? null })
-
-  test('a start after a build is an update; what a build prints is never a crash', () => {
-    const claude = startsIn(claudeLog)
-    expect(claude.starts).toHaveLength(9)
-    expect(claude.updates).toEqual([31, 37, 41, 202, 301].map(at))
-    expect(claude.crashes).toEqual([])
-  })
-
-  test('starts alongside other modules’ starts are Kehikot’s; lone ones without a reason are left', () => {
-    const others = [startsIn(otherLog('kehikot.paper')), startsIn(otherLog('kehikot.flows'))]
-    expect(unexplained(startsIn(claudeLog), others)).toEqual([])
-    /* Alone, the app's three starts within ten minutes are unexplained. */
-    expect(unexplained(startsIn(claudeLog), [])).toEqual([0, 120, 125, 128].map(at))
-    expect(unexplained(startsIn(claudeLog), others.slice(0, 1))).toEqual([0, 120, 125, 128].map(at))
-  })
-
-  test('nine starts from updates and app restarts are not worth a look', () => {
-    const now = at(130)
-    const others = [startsIn(otherLog('kehikot.paper')), startsIn(otherLog('kehikot.flows'))]
-    const claude = judge(healthOf('kehikot.claude', startsIn(claudeLog), others, now), undefined, now)
-    expect(claude.level).toBe('normal')
-    expect(claude.said).not.toContain('started')
+  test('updates and app restarts are not crashes, and what a build prints is never one', () => {
+    expect(crashesIn(claudeLog)).toEqual([])
+    const now = at(210)
+    expect(judge(healthOf('kehikot.claude', claudeLog, now), now).level).toBe('normal')
+    expect(crashesSaid({ ...snapshotOf(now), modules: [healthOf('kehikot.claude', claudeLog, now)] }, now)).toBe('')
   })
 
   test('three crashes in ten minutes are worth a look, said in words', () => {
     const now = at(410)
-    const diff = startsIn(diffLog)
-    expect(diff.crashes).toEqual([403, 406, 409].map(at))
-    expect(judge(healthOf('kehikot.diff', diff, [], now), undefined, now)).toMatchObject({ level: 'critical', said: 'crashed 3 times in 10 min' })
+    expect(crashesIn(diffLog)).toEqual([403, 406, 409].map(at))
+    expect(judge(healthOf('kehikot.diff', diffLog, now), now)).toMatchObject({ level: 'critical', said: 'crashed 3 times in 10 min' })
     /* One crash is still a crash; an hour later it is not news. */
-    const once = startsIn([start(400), 'error: script "dev" exited with code 1', start(401)].join('\n'))
-    expect(judge(healthOf('kehikot.diff', once, [], at(420)), undefined, at(420)).said).toBe('crashed in the last hour')
-    expect(judge(healthOf('kehikot.diff', once, [], at(470)), undefined, at(470)).level).toBe('normal')
+    const once = [start(400), 'error: script "dev" exited with code 1', start(401)].join('\n')
+    expect(judge(healthOf('kehikot.diff', once, at(420)), at(420)).said).toBe('crashed in the last hour')
+    expect(judge(healthOf('kehikot.diff', once, at(470)), at(470)).level).toBe('normal')
   })
 
-  test('three starts in ten minutes that nothing explains are worth a word, without a crash’s weight', () => {
-    const now = at(130)
-    const lone = startsIn([0, 120, 125, 128].map(start).join('\n'))
-    expect(judge(healthOf('kehikot.notes', lone, [], now), undefined, now)).toMatchObject({ level: 'warn', said: 'started 3 times in 10 min, no update or crash in its log' })
-    /* Two are not a burst. */
-    const two = startsIn([0, 120, 125].map(start).join('\n'))
-    expect(judge(healthOf('kehikot.notes', two, [], now), undefined, now).level).toBe('normal')
+  test('the crash line names the module and says nothing else; nothing when none crashed lately', () => {
+    const now = at(410)
+    const snapshot = { ...snapshotOf(now), modules: [healthOf('kehikot.diff', diffLog, now), healthOf('kehikot.review', start(0), now)] }
+    expect(crashesSaid(snapshot, now)).toBe('Diff crashed 3 times in 10 min')
+    expect(crashesSaid(snapshot, at(600))).toBe('')
+    expect(crashesSaid({ ...snapshot, modules: [{ ...snapshot.modules[0]!, running: false }] }, now)).toBe('Diff is down after a crash')
   })
 
   test('the most in any window', () => {
@@ -180,34 +137,9 @@ describe('worth a look: crashes, not updates or restarts', () => {
   })
 })
 
-describe('latency and errors from the traffic record', () => {
-  test('nearest-rank percentiles', () => {
-    const sorted = Array.from({ length: 100 }, (_, i) => i + 1)
-    expect(percentile(sorted, 0.5)).toBe(50)
-    expect(percentile(sorted, 0.95)).toBe(95)
-    expect(percentile([], 0.5)).toBeNull()
-  })
-
-  test('per caller: the calls it made, and the calls its server answered on its port', () => {
-    const calls = [
-      ...Array.from({ length: 19 }, (_, i) => call({ at: NOW - 1000 - i, by: 'kehikot.kanban', ms: 10 })),
-      call({ at: NOW - 900, by: 'kehikot.kanban', ms: 3000, ok: false, status: 500 }),
-      call({ at: NOW - 800, by: 'kehikko', side: 'out', host: '127.0.0.1:4190', ms: 40 }),
-      call({ at: NOW - 10 * 60_000, by: 'kehikot.kanban', ms: 99_999 }),
-      call({ at: NOW - 700, by: 'kehikot.kanban', side: 'seen', ms: 99_999 }),
-    ]
-    const lat = latencies(calls, NOW, new Map([['kehikot.diff', 4190]]))
-    const kanban = lat.find((one) => one.by === 'kehikot.kanban')!
-    expect(kanban).toMatchObject({ calls: 20, errors: 1, p50: 10, p95: 10 })
-    const diff = lat.find((one) => one.by === 'kehikot.diff')!
-    expect(diff.calls).toBe(0)
-    expect(diff.answered).toMatchObject({ calls: 1, p95: 40 })
-  })
-})
-
 describe('judging', () => {
   test('a crash is worse than busy, busy is worse than quiet; a quiet module says what it costs', () => {
-    const ranked = judged(snapshotOf(NOW), [], NOW)
+    const ranked = judged(snapshotOf(NOW), NOW)
     expect(ranked.map((one) => [one.name, one.level])).toEqual([
       ['Diff', 'critical'],
       ['Kanban', 'warn'],
@@ -217,12 +149,6 @@ describe('judging', () => {
     ])
     expect(ranked[1]!.said).toBe('120% CPU')
     expect(ranked.at(-1)!.said).toBe('not running')
-  })
-
-  test('slow calls and failing calls are worth a word', () => {
-    const snapshot = snapshotOf(NOW)
-    const ranked = judged(snapshot, [{ by: 'kehikot.review', timed: 10, calls: 10, errors: 5, p50: 100, p95: 2500, answered: null }], NOW)
-    expect(ranked.find((one) => one.id === 'kehikot.review')).toMatchObject({ level: 'warn', said: 'calls take 2.5 s (p95)' })
   })
 
   test('totals count every running module once, and the charts add them at each sample', () => {
@@ -242,8 +168,15 @@ describe('judging', () => {
   })
 
   test('every view of the tool answers, and before a sample it says to ask again', () => {
-    for (const view of ['now', 'processes', 'calls', 'restarts', 'disk'] as const) expect(healthSaid(snapshotOf(NOW), [], NOW, view).length).toBeGreaterThan(20)
-    expect(healthSaid({ ...snapshotOf(NOW), at: 0 }, [], NOW)).toContain('Ask again')
+    for (const view of ['now', 'processes', 'disk'] as const) expect(healthSaid(snapshotOf(NOW), NOW, view).length).toBeGreaterThan(20)
+    expect(healthSaid({ ...snapshotOf(NOW), at: 0 }, NOW)).toContain('Ask again')
+  })
+
+  test('Health says nothing of calls or restarts any more, and the old views say so', () => {
+    for (const view of ['now', 'processes', 'disk'] as const) expect(healthSaid(snapshotOf(NOW), NOW, view).toLowerCase()).not.toMatch(/restart|p95|calls? (take|fail)|starts/)
+    expect(goneSaid('calls')).toContain('no longer tracks call times')
+    expect(goneSaid('restarts')).toContain('no longer tracks restarts')
+    expect(healthSaid(snapshotOf(NOW), NOW)).toContain('Diff crashed in the last hour.')
   })
 })
 
@@ -252,7 +185,7 @@ describe('the footer’s health', () => {
   test('the worst module, CPU as a meter of the cores and memory; a nearly full disk too', () => {
     const snapshot = snapshotOf(NOW)
     snapshot.disk.free = 20e9
-    const items = footerItems({ ...base, health: { snapshot, judged: judged(snapshot, [], NOW) } })
+    const items = footerItems({ ...base, health: { snapshot, judged: judged(snapshot, NOW) } })
     expect(footerItemsSchema.safeParse(items).success).toBe(true)
     expect(items.find((i) => i.id === 'worst')).toMatchObject({ kind: 'text', text: 'Diff: crashed in the last hour', level: 'critical' })
     expect(items.find((i) => i.id === 'cpu')).toMatchObject({ kind: 'meter', label: 'CPU', text: '134% · 10 cores' })
@@ -264,7 +197,7 @@ describe('the footer’s health', () => {
   test('with nothing wrong it names the busiest; before the first sample it says nothing of health', () => {
     const snapshot = snapshotOf(NOW)
     snapshot.modules = snapshot.modules.filter((m) => m.id === 'kehikko' || m.id === 'kehikot.review')
-    const items = footerItems({ ...base, health: { snapshot, judged: judged(snapshot, [], NOW) } })
+    const items = footerItems({ ...base, health: { snapshot, judged: judged(snapshot, NOW) } })
     expect(items.find((i) => i.id === 'worst')).toMatchObject({ text: 'Busiest: Kehikot · 10% CPU, 500 MB', level: 'normal' })
     expect(footerItems({ ...base, health: { snapshot: { ...snapshot, at: 0 }, judged: [] } }).some((i) => i.id === 'cpu')).toBe(false)
   })
@@ -315,7 +248,7 @@ describe('the sampler', () => {
     expect(worktreeRoots(home)).toEqual([trees])
   })
 
-  test('CPU is the time used between two samples, each module counted once; restarts, disk and Monitor itself', async () => {
+  test('CPU is the time used between two samples, each module counted once; disk and Monitor itself', async () => {
     const sampler = new Sampler(deps)
     try {
       await sampler.snapshot()
@@ -330,13 +263,13 @@ describe('the sampler', () => {
       expect(host.now!.cpu).toBeCloseTo(0.4)
       expect(host.procs).toBe(2)
       expect(host.now!.rss).toBe((204800 + 102400) * 1024)
-      expect(kanban).toMatchObject({ running: true, starts: 1, crashes: 0 })
+      expect(kanban).toMatchObject({ running: true, crashedAt: [] })
       expect(snap.modules.find((m) => m.id === 'kehikot.diff')).toMatchObject({ running: false, points: [] })
       expect(snap.self).toMatchObject({ rss: 40960 * 1024 })
       const disk = (await sampler.snapshot()).disk
       expect(disk.free).toBe(100000 * 1024)
       expect(disk.uses.find((use) => use.kind === 'worktrees')).toMatchObject({ count: 2, withModules: 1, bytes: 1024 * 1024 })
-      expect(disk.uses.some((use) => use.label.includes('frame.sqlite'))).toBe(true)
+      expect(disk.uses.some((use) => use.label === 'Kehikot’s database')).toBe(true)
       /* lsof is not asked again before LISTEN_MS while every server is still there. */
       expect(ran.filter((one) => one === 'lsof')).toHaveLength(1)
     } finally {
