@@ -1,5 +1,6 @@
-import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 
+import { fromKeyboard, hideTip, showTip, useTip } from '@/lib/one-tip'
 import { indexAt, PAD_X, segmentAt, stepped, TIP_GAP, tipAlign, tipSide, type Tip } from '@/view/tiles'
 
 /**
@@ -13,6 +14,9 @@ import { indexAt, PAD_X, segmentAt, stepped, TIP_GAP, tipAlign, tipSide, type Ti
  * (the popover token, a strong border and a shadow), 12 px, three short lines at most (`Tip`), and
  * sits outside the plot — above it when there is room, else below — so it never lies over the chart's
  * labels. Along the plot it leans away from the edge and never makes the page scroll sideways.
+ *
+ * One tooltip on the page at a time (`useTip`): it goes when the pointer leaves the plot or the page,
+ * and focus shows it only from the keyboard, so a click never leaves one pinned.
  *
  * A line or bar plot runs through the tile's padding, edge to edge.
  */
@@ -48,7 +52,12 @@ export function Plot({
   const tipBox = useRef<HTMLDivElement>(null)
   const [active, setActive] = useState<number | null>(null)
   const [side, setSide] = useState<'above' | 'below'>('above')
-  const shown = active !== null && active < count ? active : null
+  const { key: tipKey, mine } = useTip()
+  const shown = mine && active !== null && active < count ? active : null
+
+  useEffect(() => {
+    if (!mine) setActive(null)
+  }, [mine])
 
   useLayoutEffect(() => {
     if (shown === null || !box.current || !tipBox.current) return
@@ -59,13 +68,18 @@ export function Plot({
     const rect = event.currentTarget.getBoundingClientRect()
     const x = event.clientX - rect.left
     const y = event.clientY - rect.top
-    setActive(kind === 'ring' ? segmentAt(x, y, ring, fractions) : indexAt(x, rect.width, count, kind))
+    const at = kind === 'ring' ? segmentAt(x, y, ring, fractions) : indexAt(x, rect.width, count, kind)
+    setActive(at)
+    if (at === null) hideTip(tipKey)
+    else showTip(tipKey, event.currentTarget, { touch: event.pointerType === 'touch' })
   }
   const key = (event: KeyboardEvent<HTMLDivElement>) => {
     const next = stepped(event.key, shown, count)
     if (next === undefined) return
     event.preventDefault()
     setActive(next)
+    if (next === null) hideTip(tipKey)
+    else showTip(tipKey, event.currentTarget, { keyboard: true })
   }
 
   const align = kind === 'ring' ? 'start' : tipAlign(shown ?? 0, count)
@@ -88,14 +102,22 @@ export function Plot({
         tabIndex={count ? 0 : -1}
         className="focus-visible:ring-ring shrink-0 touch-pan-y rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset"
         style={kind === 'ring' ? { width: ring, height: ring } : { width: '100%', height: '100%' }}
-        onFocus={() => setActive((was) => was ?? (kind === 'ring' ? 0 : count - 1))}
-        onBlur={() => setActive(null)}
+        onFocus={(event) => {
+          if (!count || !fromKeyboard()) return
+          setActive((was) => was ?? (kind === 'ring' ? 0 : count - 1))
+          showTip(tipKey, event.currentTarget, { keyboard: true })
+        }}
+        onBlur={() => {
+          setActive(null)
+          hideTip(tipKey)
+        }}
         onKeyDown={key}
         onPointerDown={point}
         onPointerMove={point}
         onPointerLeave={(event) => {
-          if (event.pointerType === 'mouse' && document.activeElement !== event.currentTarget) setActive(null)
+          if (event.pointerType !== 'touch') hideTip(tipKey)
         }}
+        onPointerCancel={() => hideTip(tipKey)}
       >
         {children(shown)}
       </div>
