@@ -187,27 +187,22 @@ export interface Segment {
   fraction: number
 }
 
-/** `label` is said in full (the list, the tool); `short` names it in the doughnut's hole and a tooltip. */
-const NAMES: Record<SegmentKey, { label: string; name: string; short: string }> = {
-  frame: { label: 'Kehikot’s database', name: 'Kehikot’s database', short: 'Database' },
-  modules: { label: 'Installed modules', name: 'Installed modules', short: 'Modules' },
-  logs: { label: 'Logs', name: 'Logs', short: 'Logs' },
-  worktrees: { label: 'Agent worktrees (code copies agents work in)', name: 'Agent worktrees', short: 'Worktrees' },
-  other: { label: 'Other Kehikot files', name: 'Other Kehikot files', short: 'Other files' },
+/** One plain name for each part, said everywhere; `short` names it in the doughnut's hole. */
+const NAMES: Record<SegmentKey, { name: string; short: string }> = {
+  frame: { name: 'Database', short: 'Database' },
+  modules: { name: 'Modules', short: 'Modules' },
+  logs: { name: 'Logs', short: 'Logs' },
+  worktrees: { name: 'Agent worktrees', short: 'Worktrees' },
+  other: { name: 'Other', short: 'Other' },
 }
-
-/** Said once beside the shares, so a percentage is not mistaken for how full the disk is. */
-export const SHARE_OF = 'of what Kehikot uses'
 
 /** What Kehikot takes on the disk, one segment per consumer, the biggest first; nothing of size 0. */
 export function diskSegments(disk: Disk): Segment[] {
   const bytes: Record<SegmentKey, number> = { frame: 0, modules: 0, logs: 0, worktrees: 0, other: 0 }
-  const others: string[] = []
   for (const use of disk.uses) {
     const key: SegmentKey =
       use.kind === 'worktrees' ? 'worktrees' : use.kind === 'logs' ? 'logs' : /database/.test(use.label) ? 'frame' : use.label === 'Installed modules' ? 'modules' : 'other'
     bytes[key] += use.bytes
-    if (key === 'other' && use.bytes > 0) others.push(use.label.toLowerCase())
   }
   const total = Object.values(bytes).reduce((sum, n) => sum + n, 0)
   if (!total) return []
@@ -215,7 +210,7 @@ export function diskSegments(disk: Disk): Segment[] {
     .filter((key) => bytes[key] > 0)
     .map((key) => ({
       key,
-      label: key === 'other' && others.length ? `Other Kehikot files (${others.join(', ')})` : NAMES[key].label,
+      label: NAMES[key].name,
       name: NAMES[key].name,
       short: NAMES[key].short,
       bytes: bytes[key],
@@ -224,28 +219,19 @@ export function diskSegments(disk: Disk): Segment[] {
     .sort((a, b) => b.bytes - a.bytes)
 }
 
-/** The tooltip: "120 GB · 94%", what it is, and what the share is of. */
+/** The tooltip: the name, then "120 GB · 94%". */
 export function segmentTip(one: Segment): Tip {
-  return { value: `${sizeSaid(one.bytes)} · ${percent(one.fraction)}`, detail: clip(one.name), note: SHARE_OF }
+  return { value: clip(one.name), detail: `${sizeSaid(one.bytes)} · ${percent(one.fraction)}`, note: '' }
 }
 
-/** One consumer in a line: "Agent worktrees (code copies agents work in) · 120 GB · 94%". */
+/** One consumer in a line: "Agent worktrees · 120 GB · 94%". */
 export const segmentSaid = (one: Segment): string => `${one.label} · ${sizeSaid(one.bytes)} · ${percent(one.fraction)}`
 
-/** The doughnut as a sentence: every segment, its size and its share of what Kehikot uses. */
+/** The doughnut as a sentence: every segment, its size and its share. */
 export function segmentsSaid(segments: readonly Segment[]): string {
   if (!segments.length) return 'Kehikot’s folders are being measured.'
   const total = segments.reduce((sum, one) => sum + one.bytes, 0)
-  return `Kehikot uses ${sizeSaid(total)}. Each share is ${SHARE_OF}, not of the disk: ${segments.map(segmentSaid).join('; ')}.`
-}
-
-/** How much of what Kehikot uses is agent worktrees, when that is most of it. */
-export const WORKTREES_DOMINATE = 0.5
-
-/** The quiet hint for a disk that agent worktrees fill; '' when they do not. The path is the host's: Settings, About, its worktree cleanup. */
-export function cleanupHint(segments: readonly Segment[]): string {
-  const share = segments.find((one) => one.key === 'worktrees')?.fraction ?? 0
-  return share > WORKTREES_DOMINATE ? 'Most of this is agent worktrees; finished ones can be cleaned up in Settings › About › Clean up finished worktrees.' : ''
+  return `Kehikot uses ${sizeSaid(total)}: ${segments.map(segmentSaid).join('; ')}.`
 }
 
 /** The Disk tile's two lines: what the number is, and what is left. Low space leads with how full the disk is. */

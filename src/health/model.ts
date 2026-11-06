@@ -1,7 +1,7 @@
 import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
 
 import { callerName, spoken } from '../traffic/model.ts'
-import { cleanupHint, diskSegments, segmentSaid } from '../view/tiles.ts'
+import { diskSegments, segmentSaid } from '../view/tiles.ts'
 
 /**
  * The health of Kehikot and its modules on this computer, as plain values. Pure and shared by the
@@ -397,11 +397,9 @@ export function healthSaid(snapshot: Snapshot, now: number, view: HealthView = '
     if (snapshot.disk.at !== null) lines.push(`Measured ${agoSaid(snapshot.disk.at, now)}; sizes only, every 30 minutes while Monitor is watched.`)
     if (snapshot.disk.why) lines.push(snapshot.disk.why)
     const segments = diskSegments(snapshot.disk)
-    lines.push('', 'Each share is of what Kehikot uses, not of the disk.', ...segments.map((one) => `- ${segmentSaid(one)}`))
+    lines.push('', ...segments.map((one) => `- ${segmentSaid(one)}`))
     const trees = worktreesOf(snapshot.disk)
     if (trees.count) lines.push(`${trees.count} agent worktrees, ${trees.withModules} with node_modules.`)
-    const hint = cleanupHint(segments)
-    if (hint) lines.push(hint)
   }
   if (snapshot.self) lines.push('', `Monitor itself: ${percent(snapshot.self.cpu)} CPU, ${sizeSaid(snapshot.self.rss)}.`)
   return lines.join('\n')
