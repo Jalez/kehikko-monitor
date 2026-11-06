@@ -24,7 +24,6 @@ import {
 import { Plot } from '@/view/plot'
 import {
   centreLabel,
-  cleanupHint,
   cpuTip,
   diskSegments,
   diskWords,
@@ -37,7 +36,6 @@ import {
   PAD_Y,
   ringRow,
   ROW_GAP,
-  SHARE_OF,
   SUB_HEIGHT,
   segmentSaid,
   segmentsSaid,
@@ -122,7 +120,6 @@ function Tiles({ snapshot, width }: { snapshot: Snapshot; width: number | null }
   const segments = diskSegments(snapshot.disk)
   const disk = diskLevel(snapshot.disk)
   const words = diskWords(snapshot.disk, segments, disk !== 'normal')
-  const hint = cleanupHint(segments)
   return (
     /* No cards: the grid's 1 px gap shows the border colour between tiles, which stand on the page's own background. */
     <div className="bg-border grid min-w-0 shrink-0 grid-cols-1 gap-px @min-[360px]:grid-cols-2 @min-[640px]:grid-cols-3" data-testid="tiles" data-axes={layout.axes} data-compact={layout.compact}>
@@ -158,11 +155,6 @@ function Tiles({ snapshot, width }: { snapshot: Snapshot; width: number | null }
         >
           {(active) => (segments.length ? <Doughnut segments={segments} size={layout.ring} active={active} /> : null)}
         </Plot>
-        {hint ? (
-          <p className="text-muted-foreground text-[11px]" data-testid="tile-disk-hint">
-            {hint}
-          </p>
-        ) : null}
       </Tile>
     </div>
   )
@@ -227,7 +219,7 @@ function Doughnut({ segments, size, active }: { segments: readonly Segment[]; si
 /** The doughnut in words: each consumer and its size. Beside it when the tile has room, for screen readers only when not. */
 function Segments({ segments, shown }: { segments: readonly Segment[]; shown: boolean }) {
   return (
-    <ul aria-label={`What Kehikot uses on the disk, each share ${SHARE_OF}`} className={shown ? 'flex min-w-0 flex-1 flex-col text-[11px] tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
+    <ul aria-label="What Kehikot uses on the disk" className={shown ? 'flex min-w-0 flex-1 flex-col text-[11px] tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
       {segments.map((one) => (
         <li key={one.key} className="flex min-w-0 items-center gap-1.5" style={shown ? { height: LEGEND_ROW, lineHeight: `${LEGEND_ROW}px` } : undefined}>
           <span aria-hidden className="size-2 shrink-0 rounded-[2px]" style={{ background: DISK[one.key] }} />
@@ -318,7 +310,6 @@ function Modules({ snapshot, judged }: { snapshot: Snapshot; judged: readonly Ju
 function DiskList({ snapshot, now }: { snapshot: Snapshot; now: number }) {
   const { disk } = snapshot
   const segments = diskSegments(disk)
-  const hint = cleanupHint(segments)
   const trees = worktreesOf(disk)
   return (
     <section aria-labelledby="disk-title" className="flex min-w-0 flex-col gap-1">
@@ -326,7 +317,7 @@ function DiskList({ snapshot, now }: { snapshot: Snapshot; now: number }) {
         What Kehikot uses on the disk
       </h2>
       <p className="text-muted-foreground text-xs">
-        {diskSaid(disk)} Each share is {SHARE_OF}, not of the disk.
+        {diskSaid(disk)}
         {disk.at !== null ? ` Measured ${agoSaid(disk.at, now)}; sizes only.` : ''}
         {disk.why ? ` ${disk.why}` : ''}
       </p>
@@ -340,11 +331,6 @@ function DiskList({ snapshot, now }: { snapshot: Snapshot; now: number }) {
         ))}
       </ul>
       {trees.count ? <p className="text-muted-foreground text-xs">{trees.count} agent worktrees, {trees.withModules} with node_modules.</p> : null}
-      {hint ? (
-        <p className="text-muted-foreground text-xs" data-testid="disk-hint">
-          {hint}
-        </p>
-      ) : null}
     </section>
   )
 }

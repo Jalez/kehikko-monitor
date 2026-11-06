@@ -18,8 +18,7 @@ again and again, so redundant polling stands out.
   and each module's, marked "no reason given".
 - **Health.** Choose View › Health: how much CPU and memory each module and
   Kehikot use (sampled every 5 seconds), and what Kehikot uses on the disk —
-  its database, installed modules, logs and agent worktrees, each with its share
-  of what Kehikot uses. Three tiles (CPU, Memory, Disk) at a glance, one column
+  its database, installed modules, logs and agent worktrees, each with its share. Three tiles (CPU, Memory, Disk) at a glance, one column
   to three side by side as the container widens, a table of modules as it
   grows. A module that crashed in the last hour is said in one quiet line;
   otherwise nothing. Calls and restarts are not tracked in Health: Traffic has

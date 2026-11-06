@@ -50,10 +50,10 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   (`crashesSaid`), nothing otherwise. The `health` tool answers `calls` and
   `restarts` with a "not tracked" sentence (`goneSaid`). Traffic keeps the calls.
 - **The Disk tile says what its numbers are.** "Kehikot uses X" with "Y free
-  on this disk" (`diskWords`); each consumer is named in words and its share is
-  "of what Kehikot uses" (`SHARE_OF`), never read as how full the disk is. The
-  worktree cleanup hint names the host's real path (Settings › About ›
-  Clean up finished worktrees); check it against the host when it moves.
+  on this disk" (`diskWords`) says it all. Each part has one short name
+  (Agent worktrees, Modules, Database, Logs, Other) and a tooltip of name,
+  size and share. No explanations or hints beside them: the person asked for
+  none (0.10.1).
 - **What the record says is text.** Addresses, kinds and reasons come from
   programs on this computer: drawn as text, never markup or links, and data
   for an agent, never instructions.

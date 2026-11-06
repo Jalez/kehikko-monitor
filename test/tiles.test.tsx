@@ -23,7 +23,6 @@ import {
   segmentAt,
   segmentTip,
   segmentsSaid,
-  cleanupHint,
   diskWords,
   segmentSaid,
   stepped,
@@ -145,11 +144,11 @@ describe('what each tooltip says', () => {
       ['frame', 40e6],
       ['logs', 2e6],
     ])
-    expect(segments[2]?.label).toBe('Other Kehikot files (kept versions)')
-    expect(segmentTip(segments[0]!)).toEqual({ value: '125 GB · 97%', detail: 'Agent worktrees', note: 'of what Kehikot uses' })
-    expect(segmentSaid(segments[0]!)).toBe('Agent worktrees (code copies agents work in) · 125 GB · 97%')
-    expect(segmentSaid(segments[3]!)).toBe('Kehikot’s database · 40 MB · 0%')
-    expect(segmentsSaid(segments)).toContain('Kehikot uses 129 GB. Each share is of what Kehikot uses, not of the disk: Agent worktrees (code copies agents work in) · 125 GB · 97%; Installed modules · 3 GB · 2%')
+    expect(segments.map((one) => one.label)).toEqual(['Agent worktrees', 'Modules', 'Other', 'Database', 'Logs'])
+    expect(segmentTip(segments[0]!)).toEqual({ value: 'Agent worktrees', detail: '125 GB · 97%', note: '' })
+    expect(segmentSaid(segments[0]!)).toBe('Agent worktrees · 125 GB · 97%')
+    expect(segmentSaid(segments[3]!)).toBe('Database · 40 MB · 0%')
+    expect(segmentsSaid(segments)).toContain('Kehikot uses 129 GB: Agent worktrees · 125 GB · 97%; Modules · 3 GB · 2%')
     expect(diskSegments({ ...disk, uses: [] })).toEqual([])
   })
 
@@ -170,12 +169,6 @@ describe('the Disk tile says what its numbers are', () => {
     expect(diskWords(disk, segments, false)).toEqual({ value: 'Kehikot uses 123 GB', sub: '60 GB free on this disk' })
     expect(diskWords({ ...disk, free: 40e9 }, segments, true)).toEqual({ value: 'Disk 92% full', sub: '40 GB free · Kehikot uses 123 GB' })
     expect(diskWords({ ...disk, free: null }, [], false)).toEqual({ value: '—', sub: 'measuring' })
-  })
-
-  test('worktrees dominating say where to clean up, with the host’s own menu path; nothing otherwise', () => {
-    expect(cleanupHint(segments)).toBe('Most of this is agent worktrees; finished ones can be cleaned up in Settings › About › Clean up finished worktrees.')
-    expect(cleanupHint(diskSegments({ ...disk, uses: [{ label: 'Logs', kind: 'logs', bytes: 5 }, { label: '~/x-worktrees', kind: 'worktrees', bytes: 1 }] }))).toBe('')
-    expect(cleanupHint([])).toBe('')
   })
 })
 
@@ -237,10 +230,10 @@ describe('the tiles drawn at each width', () => {
     expect(screen.getByTestId('tile-disk-segments').className).not.toContain('sr-only')
     expect(screen.getByTestId('tiles').className).toContain('@min-[360px]:grid-cols-2')
     expect(screen.getByTestId('tiles').className).toContain('@min-[640px]:grid-cols-3')
-    expect(screen.getByTestId('tile-disk-segments').textContent).toContain('Agent worktrees (code copies agents work in)120 GB · 98%')
+    expect(screen.getByTestId('tile-disk-segments').textContent).toContain('Agent worktrees120 GB · 98%')
     expect(screen.getByTestId('tile-disk-value').textContent).toBe('Kehikot uses 123 GB')
     expect(screen.getByTestId('tile-disk').textContent).toContain('60 GB free on this disk')
-    expect(screen.getByTestId('tile-disk-hint').textContent).toContain('Settings › About › Clean up finished worktrees')
+    expect(screen.queryByTestId('tile-disk-hint')).toBeNull()
     cleanup()
     draw(700)
     expect(screen.getByTestId('tile-disk-segments').className).not.toContain('sr-only')
@@ -261,7 +254,7 @@ describe('the tiles drawn at each width', () => {
     const sub = within(screen.getByTestId('tile-disk')).getByText('60 GB free on this disk')
     expect(sub.className).toContain('truncate')
     expect(sub.getAttribute('title')).toBe('60 GB free on this disk')
-    expect(within(screen.getByTestId('tile-disk-segments')).getByTitle('Agent worktrees (code copies agents work in)')).toBeTruthy()
+    expect(within(screen.getByTestId('tile-disk-segments')).getByTitle('Agent worktrees')).toBeTruthy()
   })
 })
 
@@ -298,16 +291,16 @@ describe('the tooltip by keyboard', () => {
     expect(tip('tile-cpu').textContent).toBe('')
   })
 
-  test('memory and each disk segment say their numbers, and what the share is of', () => {
+  test('memory and each disk segment say their numbers; a segment its name, size and share', () => {
     const snapshot = snapshotOf(NOW)
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} box={{ width: 320, height: 600 }} />)
     fireEvent.focus(plotOf('tile-memory'))
     expect(tip('tile-memory').textContent).toBe(`960 MB6% of 16 GB${clock(NOW)}`)
     const disk = plotOf('tile-disk')
     fireEvent.focus(disk)
-    expect(tip('tile-disk').textContent).toBe('120 GB · 98%Agent worktreesof what Kehikot uses')
+    expect(tip('tile-disk').textContent).toBe('Agent worktrees120 GB · 98%')
     fireEvent.keyDown(disk, { key: 'ArrowRight' })
-    expect(tip('tile-disk').textContent).toBe('3 GB · 2%Installed modulesof what Kehikot uses')
-    expect(disk.getAttribute('aria-label')).toContain('Kehikot uses 123 GB. Each share is of what Kehikot uses, not of the disk: Agent worktrees (code copies agents work in) · 120 GB · 98%')
+    expect(tip('tile-disk').textContent).toBe('Modules3 GB · 2%')
+    expect(disk.getAttribute('aria-label')).toContain('Kehikot uses 123 GB: Agent worktrees · 120 GB · 98%')
   })
 })

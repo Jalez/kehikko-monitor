@@ -72,9 +72,9 @@ describe('the doors', () => {
     expect(said).not.toMatch(/restart|p95|call times/i)
     const disk = (await rpc('tools/call', { name: 'health', arguments: { view: 'disk' } })).result.content![0]!.text
     expect(disk).toContain('40 agent worktrees, 30 with node_modules')
-    expect(disk).toContain('Agent worktrees (code copies agents work in) · 120 GB · 98%')
-    expect(disk).toContain('Each share is of what Kehikot uses, not of the disk.')
-    expect(disk).toContain('Settings › About › Clean up finished worktrees')
+    expect(disk).toContain('Agent worktrees · 120 GB · 98%')
+    expect(disk).not.toContain('not of the disk')
+    expect(disk).not.toContain('Clean up')
     /* Health reads no traffic record any more. */
     expect(asked).toHaveLength(0)
   })
