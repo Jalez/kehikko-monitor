@@ -1,6 +1,8 @@
+import { useEffect } from 'react'
 import { useHost, type Host as ProtocolHost } from 'kehikot-module-protocol/client/react'
 import type { HostEvents } from 'kehikot-module-protocol/client'
 
+import { hideTip } from '@/lib/one-tip'
 import { ID } from '../../manifest.ts'
 
 /**
@@ -17,5 +19,10 @@ export type Host = Pick<ProtocolHost, 'where' | 'projectPath' | 'theme' | 'heade
 export type Live = Host & Pick<ProtocolHost, 'kept' | 'remember' | 'read'>
 
 export function useKehikot(events: HostEvents = {}): Live {
-  return useHost(ID, events)
+  const host = useHost(ID, events)
+  /* Off screen (`kehikot.visible` false): no chart tooltip is left standing for when it comes back. */
+  useEffect(() => {
+    if (!host.visible) hideTip()
+  }, [host.visible])
+  return host
 }

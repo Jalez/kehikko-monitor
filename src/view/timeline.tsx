@@ -2,6 +2,7 @@ import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 
 import { ChartContainer, ChartTooltip, ChartTooltipContent, cssKey, type ChartConfig } from '@/components/ui/chart'
+import { hideTip, showTip, useTip } from '@/lib/one-tip'
 import type { TrafficCall } from 'kehikot-module-protocol'
 
 import { BUCKETS_MS, OTHER, buckets, callerLabel, callerOf, freeKey, isFree, type Caller, type Range, type Style } from '../traffic/model.ts'
@@ -91,6 +92,9 @@ export interface TimelineProps {
 
 export const Timeline = memo(function Timeline({ calls, range, order, only, now, style = 'lines', narrow: said }: TimelineProps) {
   const [ref, width] = useWidth()
+  /* Recharts' tooltip, held to the page's one tooltip (`useTip`): while another is shown, or once the
+     pointer has left the page, it is off, its cursor with it, and a line's hover dot is not drawn. */
+  const { key: tipKey, mine: tipMine } = useTip()
   const narrow = said ?? (width !== null && width < NARROW_PX)
   const bucketMs = BUCKETS_MS[style][range]
   const from = now - range * 60_000
@@ -137,6 +141,7 @@ export const Timeline = memo(function Timeline({ calls, range, order, only, now,
       cursor={cursor}
       content={<ChartTooltipContent labelFormatter={(label) => clock(Number(label))} formatter={(value) => `${Math.round(value * 100) / 100}/s`} />}
       isAnimationActive={false}
+      {...(tipMine ? {} : { active: false })}
     />
   )
   const hatches = (
@@ -173,8 +178,8 @@ export const Timeline = memo(function Timeline({ calls, range, order, only, now,
         {y}
         {tooltip({ stroke: 'var(--border)' })}
         {series.flatMap(({ caller }) => [
-          <Area key={caller} type="monotone" dataKey={caller} stackId="calls" stroke={colour(caller)} strokeWidth={2} fill={colour(caller)} fillOpacity={0.3} isAnimationActive={false} />,
-          <Area key={freeKey(caller)} type="monotone" dataKey={freeKey(caller)} stackId="calls" stroke="none" fill={`url(#hatch-${cssKey(caller)})`} isAnimationActive={false} />,
+          <Area key={caller} type="monotone" dataKey={caller} stackId="calls" stroke={colour(caller)} strokeWidth={2} fill={colour(caller)} fillOpacity={0.3} activeDot={tipMine} isAnimationActive={false} />,
+          <Area key={freeKey(caller)} type="monotone" dataKey={freeKey(caller)} stackId="calls" stroke="none" fill={`url(#hatch-${cssKey(caller)})`} activeDot={tipMine} isAnimationActive={false} />,
         ])}
       </AreaChart>
     ) : (
@@ -193,7 +198,7 @@ export const Timeline = memo(function Timeline({ calls, range, order, only, now,
             strokeLinecap="round"
             strokeLinejoin="round"
             dot={false}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--background)' }}
+            activeDot={tipMine ? { r: 4, strokeWidth: 2, stroke: 'var(--background)' } : false}
             isAnimationActive={false}
           />,
           ...(freeOf.has(caller)
@@ -216,6 +221,13 @@ export const Timeline = memo(function Timeline({ calls, range, order, only, now,
       <ChartContainer
         config={config}
         className="aspect-auto h-44 w-full"
+        data-testid="timeline-chart"
+        onPointerMove={(event) => showTip(tipKey, event.currentTarget, { touch: event.pointerType === 'touch' })}
+        onPointerDown={(event) => showTip(tipKey, event.currentTarget, { touch: event.pointerType === 'touch' })}
+        onPointerLeave={(event) => {
+          if (event.pointerType !== 'touch') hideTip(tipKey)
+        }}
+        onPointerCancel={() => hideTip(tipKey)}
         role="img"
         aria-label={`Calls per second over the last ${range} minutes, by caller, ${style === 'lines' ? 'a line for each' : style === 'bars' ? 'in stacked bars' : 'in a stacked area'}. The same numbers are in the table of callers below.`}
       >

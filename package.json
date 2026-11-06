@@ -1,6 +1,6 @@
 {
   "name": "kehikko-monitor",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "private": true,
   "type": "module",
   "description": "Monitor, a module a Kehikot host frames: the calls Kehikot and its modules make and receive on this computer, live, with their reasons and what repeats.",
