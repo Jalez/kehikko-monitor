@@ -268,6 +268,7 @@ describe('the tooltip by keyboard', () => {
     const cpu = plotOf('tile-cpu')
     expect(cpu.tabIndex).toBe(0)
     expect(tip('tile-cpu').textContent).toBe('')
+    fireEvent.keyDown(document.body, { key: 'Tab' })
     fireEvent.focus(cpu)
     expect(tip('tile-cpu').textContent).toBe(`134% CPU1.3 of 10 cores${clock(NOW)}`)
     /* Solid, 12 px, a strong border and a shadow, wrapped within a width, outside the plot. */
@@ -294,6 +295,7 @@ describe('the tooltip by keyboard', () => {
   test('memory and each disk segment say their numbers; a segment its name, size and share', () => {
     const snapshot = snapshotOf(NOW)
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} box={{ width: 320, height: 600 }} />)
+    fireEvent.keyDown(document.body, { key: 'Tab' })
     fireEvent.focus(plotOf('tile-memory'))
     expect(tip('tile-memory').textContent).toBe(`960 MB6% of 16 GB${clock(NOW)}`)
     const disk = plotOf('tile-disk')
