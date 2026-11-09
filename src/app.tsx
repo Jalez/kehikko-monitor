@@ -12,6 +12,7 @@ import { RANGES, STYLES, callerOf, colourOrder, repeats, summary, type Caller, t
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
 import { useHealth, type Health } from '@/wire/use-health'
+import { useOnScreen } from '@/wire/use-on-screen'
 
 import { HealthView } from '@/view/health'
 
@@ -28,7 +29,7 @@ const isCaller = (value: unknown) => value === null || typeof value === 'string'
 
 /**
  * The page. It owns its state — the range, the pause, the caller shown, what was cleared — and
- * reads the host's record of traffic every second while it is open and not paused.
+ * reads the host's record of traffic every second while it is on screen and not paused.
  *
  * What the header's switches chose — the view, the range, the chart, the caller — is kept with the
  * host for this container (`useKept`), so each Monitor on each kehikko opens as it was left, after a
@@ -61,9 +62,12 @@ export function App() {
     } else setClearedAt(Date.now())
   }, [setView, setRange, setStyle, setCaller])
   pressing.current = press
-  const traffic = useTraffic(host.where === 'hosted' ? host.request : null, paused, clearedAt)
+  /* Off screen (kept hidden on another kehikko, or the window hidden): nothing is read (`useOnScreen`). */
+  const shown = useOnScreen(host.visible)
+  const resting = paused || !shown
+  const traffic = useTraffic(host.where === 'hosted' ? host.request : null, resting, clearedAt)
   /* Read whatever the view: the footer says the health in both. */
-  const health = useHealth(host.where === 'hosted', paused)
+  const health = useHealth(host.where === 'hosted', resting)
 
   /* A colour follows its caller from the moment it first called, whatever the filter or the ranks. */
   useEffect(() => {
