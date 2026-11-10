@@ -17,6 +17,7 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | `src/view/` | The timeline (shadcn chart over Recharts: lines, bars or area), Repeats, the callers table, the virtual list of calls, open connections. |
 | `src/health/model.ts` | Pure and shared by the page, the sampler and the door: reading `ps`/`lsof`, a module's process tree, the host's start markers and crash lines in a module log (`crashesIn`), judging (`judge`, `LIMITS`), and every sentence of the Health view and the `health` tool. |
 | `health/sampler.ts` | The server's one `Sampler`: `ps` every 5 s, `lsof` every 15 s, the registry every 30 s, module logs every minute, sizes every 30 minutes (agent worktrees summed every 6 hours) — only while the page or the tool asked in the last 30 s. A ring of 60 samples per module, in memory. Served at `GET /api/health`. |
+| `src/health/heavy.ts` | Pure: heavy work (a typecheck, tests, a build, an install) an agent session started outside the Queue — classified by program (`heavyWord`), attributed by walking up to the agent CLI, skipped under a Queue run; the one line said. Looked for every `HEAVY_MS` while watched. |
 | `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: three glance tiles (CPU, Memory, Disk), a crash line, the table and the disk list as its own box grows (`detailOf`). |
 | `src/header.ts` | The header items: pure functions of state. |
 | `src/footer.ts` | The footer items: the traffic's readouts and, after the first sample, the health's (the worst module, CPU as a meter of the cores, memory, a nearly full disk). |
@@ -41,7 +42,10 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 - **Health reads figures, never contents.** Process figures (`ps`, `lsof`),
   sizes (`df`, `du`, `stat`), the registry's `url` for a port, and only the
   host's start and build markers and crash lines of a module log. Never another file's
-  contents, never a command line. Sample only while somebody looks
+  contents, never a command line said or kept: the one exception is `src/health/heavy.ts`,
+  which reads command lines only to classify heavy work into one word of `HEAVY`, and a
+  flagged process's environment only for its agent session's variable (`SESSION_VARS`);
+  both are dropped at once. Sample only while somebody looks
   (`WATCH_MS`), keep only the ring in memory, and keep `du` rare and at the
   lowest priority: a hundred worktrees with node_modules take minutes to sum.
 - **Health is CPU, memory and disk.** Restarts and call times are not

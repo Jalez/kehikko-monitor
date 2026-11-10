@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
 
+import { heavyOutside, parseProcLines, sessionFrom, type Outside } from '../src/health/heavy.ts'
 import { crashesIn, parseListeners, parsePs, treeOf, type Disk, type DiskUse, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
 
 /**
@@ -25,6 +26,9 @@ import { crashesIn, parseListeners, parsePs, treeOf, type Disk, type DiskUse, ty
  * - The registry's file names and each one's `url` (the port), every `REGISTRY_MS`.
  * - Each module's log under the logs folder, every `LOGS_MS` and only when its size or time
  *   changed: the host's start markers and crash lines (`crashesIn`). Nothing else of it is kept.
+ * - `ps -A -o pid=,ppid=,pcpu=,args=` every `HEAVY_MS`: heavy work an agent session started outside
+ *   the Queue. Each command line is only classified into one word (`heavyWord`) and dropped; for a
+ *   process so flagged, its `ps -E` once, for the agent CLI's session variable alone.
  * - Sizes, every `DISK_MS`: `df` for the home folder's disk, `stat` for frame.sqlite, `du` at the
  *   lowest priority for the installed modules, versions and logs; agent worktrees are counted
  *   every time and summed every `WORKTREES_MS`. Sizes only:
@@ -40,6 +44,8 @@ export const LISTEN_MS = 15_000
 export const REGISTRY_MS = 30_000
 export const LOGS_MS = 60_000
 export const DISK_MS = 30 * 60_000
+/** How often heavy work outside the Queue is looked for (`src/health/heavy.ts`). */
+export const HEAVY_MS = 15_000
 /** How often agent worktrees are summed with `du`: rarely, because it reads every file's size in them. */
 export const WORKTREES_MS = 6 * 60 * 60_000
 const DAY_MS = 24 * 60 * 60_000
@@ -213,6 +219,11 @@ export class Sampler {
   private logsAt = 0
 
   private disk: Disk = { at: null, free: null, total: null, uses: [], why: '' }
+
+  private outside: Outside[] = []
+  private heavyAt = 0
+  /** The session of each flagged pid, read once: a pid's environment does not change. */
+  private sessions = new Map<number, string | null>()
   private diskRunning: Promise<void> | null = null
 
   constructor(deps: Deps = DEPS) {
@@ -324,10 +335,38 @@ export class Sampler {
     this.sampleBefore = now
     this.lastSample = now
     if (now - this.logsAt >= LOGS_MS || !this.logsAt) this.readLogs(where.logs, now)
+    if (now - this.heavyAt >= HEAVY_MS || !this.heavyAt) await this.lookForHeavy(now)
     if (!this.diskRunning && (this.disk.at === null ? true : now - this.disk.at >= DISK_MS)) this.diskRunning = this.measureDisk().finally(() => (this.diskRunning = null))
   }
 
   private hostPorts: number[] = []
+
+  /** Heavy work an agent session started outside the Queue, with its session once per process. */
+  private async lookForHeavy(now: number): Promise<void> {
+    this.heavyAt = now
+    let found: Outside[]
+    try {
+      found = heavyOutside(parseProcLines(await this.deps.run('ps', ['-A', '-o', 'pid=,ppid=,pcpu=,args='], 5_000)), this.deps.pid)
+    } catch {
+      this.outside = []
+      return
+    }
+    const live = new Set(found.map((one) => one.pid))
+    for (const pid of [...this.sessions.keys()]) if (!live.has(pid)) this.sessions.delete(pid)
+    for (const one of found.slice(0, 8)) {
+      if (!this.sessions.has(one.pid)) {
+        let session: string | null = null
+        try {
+          session = sessionFrom(await this.deps.run('ps', ['-E', '-ww', '-o', 'command=', '-p', String(one.pid)], 3_000))
+        } catch {
+          /* Gone, or its environment cannot be read: said by its session's pid instead. */
+        }
+        this.sessions.set(one.pid, session)
+      }
+      one.session = this.sessions.get(one.pid) ?? null
+    }
+    this.outside = found
+  }
 
   /** Who answers on a module's port; for Kehikot, on any of its ports. */
   private portPid(id: string, port: number): number | undefined {
@@ -448,7 +487,7 @@ export class Sampler {
         crashedAt: day(this.logs.get(id)?.crashes),
       }
     })
-    return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, disk: this.disk, self: this.selfPoint, why: this.why }
+    return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, disk: this.disk, self: this.selfPoint, why: this.why, outside: this.outside }
   }
 
   /** Wait for a disk measurement under way: for the tests. */
