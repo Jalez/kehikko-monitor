@@ -162,6 +162,14 @@ export function Screen({
     if (footerSaid) footer?.(JSON.parse(footerSaid))
   }, [footer, footerSaid])
 
+  /* The host's cover is held until the page is drawn (protocol 2.70.0): once the first read of the traffic has
+     come back or failed, or a cover says why there is nothing to read. */
+  const drawn = cover !== null ? cover !== 'waiting' : traffic.at !== null || Boolean(traffic.problem)
+  const { ready } = host
+  useEffect(() => {
+    if (drawn) ready?.()
+  }, [drawn, ready])
+
   return (
     <div className="flex h-screen min-w-0 flex-col text-sm">
       {host.where === 'unhosted' ? (
@@ -170,7 +178,7 @@ export function Screen({
           <HeaderMenus items={items} onPress={onPress} />
         </header>
       ) : null}
-      <main key={again} className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
+      <main key={again} data-kehikot-scroll className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3">
         {cover ? (
           <Cover state={cover} name="Monitor" onRetry={() => setAgain((n) => n + 1)} />
         ) : state.view === 'health' ? (
