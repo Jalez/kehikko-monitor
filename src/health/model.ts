@@ -2,6 +2,7 @@ import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
 
 import { callerName, spoken } from '../traffic/model.ts'
 import { diskSegments, segmentSaid } from '../view/tiles.ts'
+import { outsideSaid, type Outside } from './heavy.ts'
 
 /**
  * The health of Kehikot and its modules on this computer, as plain values. Pure and shared by the
@@ -205,6 +206,8 @@ export interface Snapshot {
   self: Point | null
   /** A sentence when something could not be looked at (no `ps`, no registry). */
   why: string
+  /** Heavy work agent sessions started outside the Queue; absent from an older server. */
+  outside?: Outside[]
 }
 
 export const emptySnapshot = (): Snapshot => ({ at: 0, cores: 1, memory: 0, every: 5, modules: [], disk: { at: null, free: null, total: null, uses: [], why: '' }, self: null, why: '' })
@@ -385,7 +388,8 @@ export function healthSaid(snapshot: Snapshot, now: number, view: HealthView = '
     lines.push('', flagged.length ? 'Worth a look, the worst first:' : 'Nothing needs a look right now. The busiest:')
     lines.push(...(flagged.length ? flagged : all.filter((one) => byId.get(one.id)?.running).slice(0, 5)).map((one) => `- ${one.name}: ${one.said}${one.level === 'critical' ? ' (critical)' : one.level === 'warn' ? ' (warning)' : ''}`))
     const crashed = crashesSaid(snapshot, now)
-    lines.push('', ...(crashed ? [`${crashed}.`] : []), `Disk: ${snapshot.disk.at === null ? 'being measured.' : diskSaid(snapshot.disk)}`)
+    const outside = outsideSaid(snapshot.outside ?? [])
+    lines.push('', ...(crashed ? [`${crashed}.`] : []), ...(outside ? [`${outside}.`] : []), `Disk: ${snapshot.disk.at === null ? 'being measured.' : diskSaid(snapshot.disk)}`)
   }
   if (view === 'processes') {
     lines.push(`${cpuSaid(snapshot)} ${memorySaid(snapshot)} Sampled every ${snapshot.every} s; CPU is the average of the last 30 seconds.`, '')

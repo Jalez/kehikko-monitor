@@ -81,8 +81,8 @@ export function tools() {
       description:
         'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), whether one crashed in the last hour, and what Kehikot uses on the disk. '
         + 'Use it to answer "why is the computer slow", "which module is heavy", "did something crash", "what is filling the disk". '
-        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, and free disk. `processes`: every module by CPU and memory. `disk`: what Kehikot uses on the disk, by consumer: its database, installed modules, logs and agent worktrees, each with its size and share. Calls and restarts are not tracked here: the traffic tool has the calls. '
-        + 'Read-only: it stops and changes nothing, and reads only process figures, sizes and the start and crash lines of module logs.',
+        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, heavy work (a typecheck, tests, a build, an install) an agent session started outside the Queue and which session, and free disk. `processes`: every module by CPU and memory. `disk`: what Kehikot uses on the disk, by consumer: its database, installed modules, logs and agent worktrees, each with its size and share. Calls and restarts are not tracked here: the traffic tool has the calls. '
+        + 'Read-only: it stops and changes nothing, and reads only process figures, sizes, the start and crash lines of module logs, and what kind of heavy work a process is.',
       inputSchema: {
         type: 'object',
         properties: {

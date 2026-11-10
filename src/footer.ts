@@ -1,5 +1,6 @@
 import { LIMITS, footerItemsSchema, type FooterItem } from 'kehikot-module-protocol'
 
+import { outsideSaid } from './health/heavy.ts'
 import { diskLevel, freeSaid, percent, sizeSaid, totals, type Judged, type Snapshot } from './health/model.ts'
 import type { BudgetLine } from './traffic/budgets.ts'
 import type { CallerSummary } from './traffic/model.ts'
@@ -72,6 +73,18 @@ export function healthItems(health: FooterState['health']): unknown[] {
     tooltip: cut(`Kehikot and its running modules hold ${sizeSaid(sum.rss)}${snapshot.memory ? ` of this computer's ${sizeSaid(snapshot.memory)}` : ''}.`, LIMITS.FOOTER_TOOLTIP),
   })
   const level = diskLevel(snapshot.disk)
+  const outside = snapshot.outside ?? []
+  if (outside.length) {
+    const first = outside[0]!
+    items.push({
+      kind: 'text',
+      id: 'outside',
+      text: cut(`${first.word} outside the Queue${outside.length > 1 ? ` +${outside.length - 1}` : ''}`, LIMITS.FOOTER_TEXT),
+      level: 'warn',
+      align: 'center',
+      tooltip: cut(`${outsideSaid(outside)}.`, LIMITS.FOOTER_TOOLTIP),
+    })
+  }
   if (level !== 'normal') items.push({ kind: 'text', id: 'disk', text: cut(`Disk: ${sizeSaid(snapshot.disk.free ?? 0)} free`, LIMITS.FOOTER_TEXT), level, align: 'center', tooltip: cut(`${freeSaid(snapshot.disk)}. Health lists what takes the most.`, LIMITS.FOOTER_TOOLTIP) })
   return items
 }
