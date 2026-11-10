@@ -1,0 +1,193 @@
+[
+  {
+    "name": "the traffic view",
+    "header": [
+      {
+        "kind": "switch",
+        "id": "view",
+        "label": "View",
+        "agents": true,
+        "options": [
+          {
+            "id": "traffic",
+            "label": "Traffic"
+          },
+          {
+            "id": "health",
+            "label": "Health"
+          }
+        ],
+        "value": "traffic"
+      },
+      {
+        "kind": "switch",
+        "id": "range",
+        "label": "Range",
+        "agents": true,
+        "options": [
+          {
+            "id": "m5",
+            "label": "Last 5 minutes"
+          },
+          {
+            "id": "m15",
+            "label": "Last 15 minutes"
+          },
+          {
+            "id": "m60",
+            "label": "Last 60 minutes"
+          }
+        ],
+        "value": "m5"
+      },
+      {
+        "kind": "switch",
+        "id": "style",
+        "label": "Chart",
+        "agents": true,
+        "options": [
+          {
+            "id": "lines",
+            "label": "Lines"
+          },
+          {
+            "id": "bars",
+            "label": "Bars"
+          },
+          {
+            "id": "area",
+            "label": "Area"
+          }
+        ],
+        "value": "lines"
+      },
+      {
+        "kind": "toggle",
+        "id": "pause",
+        "label": "Paused",
+        "agents": true,
+        "checked": false
+      },
+      {
+        "kind": "switch",
+        "id": "caller",
+        "label": "Caller",
+        "agents": true,
+        "options": [
+          {
+            "id": "all",
+            "label": "Every caller"
+          },
+          {
+            "id": "kehikot.claude",
+            "label": "Claude"
+          },
+          {
+            "id": "host",
+            "label": "Host"
+          }
+        ],
+        "value": "all"
+      }
+    ],
+    "footer": [
+      {
+        "kind": "text",
+        "id": "live",
+        "text": "Live",
+        "level": "normal",
+        "align": "start",
+        "optional": false,
+        "tooltip": "Read every second, on this computer only."
+      },
+      {
+        "kind": "text",
+        "id": "rate",
+        "text": "0/min · 0 callers",
+        "level": "normal",
+        "align": "start",
+        "optional": true,
+        "tooltip": "Calls per minute over the last five minutes, and how many callers made them."
+      },
+      {
+        "kind": "run",
+        "id": "clear",
+        "label": "Clear",
+        "icon": "x",
+        "agents": false,
+        "state": "idle",
+        "result": null,
+        "disabled": null,
+        "confirm": false,
+        "align": "end",
+        "optional": false,
+        "tooltip": "Put away what Monitor shows; it goes on reading from now."
+      }
+    ],
+    "state": true
+  },
+  {
+    "name": "the health view",
+    "header": [
+      {
+        "kind": "switch",
+        "id": "view",
+        "label": "View",
+        "agents": true,
+        "options": [
+          {
+            "id": "traffic",
+            "label": "Traffic"
+          },
+          {
+            "id": "health",
+            "label": "Health"
+          }
+        ],
+        "value": "health"
+      },
+      {
+        "kind": "toggle",
+        "id": "pause",
+        "label": "Paused",
+        "agents": true,
+        "checked": false
+      }
+    ],
+    "footer": [
+      {
+        "kind": "text",
+        "id": "live",
+        "text": "Live",
+        "level": "normal",
+        "align": "start",
+        "optional": false,
+        "tooltip": "Read every second, on this computer only."
+      },
+      {
+        "kind": "text",
+        "id": "rate",
+        "text": "0/min · 0 callers",
+        "level": "normal",
+        "align": "start",
+        "optional": true,
+        "tooltip": "Calls per minute over the last five minutes, and how many callers made them."
+      },
+      {
+        "kind": "run",
+        "id": "clear",
+        "label": "Clear",
+        "icon": "x",
+        "agents": false,
+        "state": "idle",
+        "result": null,
+        "disabled": null,
+        "confirm": false,
+        "align": "end",
+        "optional": false,
+        "tooltip": "Put away what Monitor shows; it goes on reading from now."
+      }
+    ],
+    "state": true
+  }
+]
