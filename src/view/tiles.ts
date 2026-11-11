@@ -1,8 +1,7 @@
-import { percent, sizeSaid, type Disk } from '../health/model.ts'
+import { percent, sizeSaid } from '../health/model.ts'
 
 /**
- * How the Health view's glance tiles are laid out at a width, what each chart's tooltip says, and the
- * disk's doughnut. Pure: the page draws it, the tests read it.
+ * How the Health view's glance tiles are laid out at a width, and what each chart's tooltip says. Pure: the page draws it, the tests read it.
  *
  * The tiles carry no card of their own: no border, no background, no gap, only a hairline between
  * them and a tight padding. In one column a tile is a compact row — its title, a line in words and
@@ -16,11 +15,6 @@ export const AXES_FROM = 260
 /** The plot's own height: a sparkline, and a chart with axes. Both are a comfortable touch target. */
 export const SPARK_HEIGHT = 44
 export const AXES_HEIGHT = 72
-/** The disk's doughnut, across: beside axes, large enough for a word in its hole; beside its list; alone. */
-export const RING_WIDE = 88
-export const RING_MID = 64
-/** One row of the doughnut's list, in px. */
-export const LEGEND_ROW = 14
 /** The hairline between tiles, in px: the grid's gap, showing the border colour behind the tiles. */
 export const DIVIDER = 1
 /** A tile's padding, in px: across, and above and below. A line plot runs through the padding across. */
@@ -32,48 +26,33 @@ export const SUB_HEIGHT = 16
 export const ROW_GAP = 2
 
 export interface TileLayout {
-  /** Tiles side by side: one under 360 px, two under 640, then three (the grid's container queries). */
+  /** Tiles side by side: one under 360 px, then two (the grid's container queries). */
   columns: number
   /** One tile's width, null until the box is measured. */
   tile: number | null
   axes: boolean
   /** The plot's height in px. */
   plot: number
-  /** The disk's doughnut, across, in px. */
-  ring: number
-  /** Whether the disk's list of segments shows beside its doughnut (else it is read by screen readers only). */
-  legend: boolean
   /** One row per tile: title, words and number on one line, the plot under it. */
   compact: boolean
 }
 
 export function columnsOf(width: number): number {
-  return width < 360 ? 1 : width < 640 ? 2 : 3
+  return width < 360 ? 1 : 2
 }
-
-/** In two columns the disk takes the whole second row, so the grid has no hole and the doughnut room for its list. */
-export const diskSpan = (columns: number): number => (columns === 2 ? 2 : 1)
 
 export function tileLayout(width: number | null): TileLayout {
-  if (width === null || width <= 0) return { columns: 1, tile: null, axes: false, plot: SPARK_HEIGHT, ring: SPARK_HEIGHT, legend: false, compact: true }
+  if (width === null || width <= 0) return { columns: 1, tile: null, axes: false, plot: SPARK_HEIGHT, compact: true }
   const columns = columnsOf(width)
   const tile = Math.floor((width - DIVIDER * (columns - 1)) / columns)
-  const span = diskSpan(columns)
-  const disk = tile * span + DIVIDER * (span - 1)
   const axes = tile >= AXES_FROM
-  const legend = disk >= 180
-  return { columns, tile, axes, plot: axes ? AXES_HEIGHT : SPARK_HEIGHT, ring: axes ? RING_WIDE : legend ? RING_MID : SPARK_HEIGHT, legend, compact: columns === 1 }
+  return { columns, tile, axes, plot: axes ? AXES_HEIGHT : SPARK_HEIGHT, compact: columns === 1 }
 }
 
-/** The disk's plot row: as tall as its doughnut, or its list beside it when that is taller, never cut off. */
-export function ringRow(layout: Pick<TileLayout, 'ring' | 'legend'>, segments: number): number {
-  return Math.max(layout.ring, layout.legend ? segments * LEGEND_ROW : 0)
-}
-
-/** How tall the three tiles stand in one column, in px: two plots, the disk's row, and the hairlines between. */
-export function columnHeight(layout: TileLayout, segments: number): number {
+/** How tall the two tiles stand in one column, in px: two plots and the hairline between. */
+export function columnHeight(layout: TileLayout): number {
   const chrome = 2 * PAD_Y + HEAD_HEIGHT + ROW_GAP + (layout.compact ? 0 : SUB_HEIGHT + ROW_GAP)
-  return 2 * (chrome + layout.plot) + chrome + ringRow(layout, segments) + 2 * DIVIDER
+  return 2 * (chrome + layout.plot) + DIVIDER
 }
 
 /* ---- pointing at a chart ---- */
@@ -84,26 +63,6 @@ export function indexAt(x: number, width: number, count: number, kind: 'line' | 
   const at = Math.min(1, Math.max(0, x / width))
   const index = kind === 'line' ? Math.round(at * (count - 1)) : Math.floor(at * count)
   return Math.min(count - 1, Math.max(0, index))
-}
-
-/**
- * Which segment of a doughnut `size` px square a pointer at (`x`, `y`) is on. Segments run clockwise
- * from twelve o'clock, as drawn; `fractions` add up to 1. Null in the hole or outside the ring.
- */
-export function segmentAt(x: number, y: number, size: number, fractions: readonly number[], hole = HOLE): number | null {
-  const r = size / 2
-  const dx = x - r
-  const dy = y - r
-  const distance = Math.hypot(dx, dy)
-  if (!fractions.length || distance > r || distance < r * hole) return null
-  /* 0 at twelve o'clock, growing clockwise, in turns. */
-  const turn = (Math.atan2(dx, -dy) / (2 * Math.PI) + 1) % 1
-  let sum = 0
-  for (let i = 0; i < fractions.length; i++) {
-    sum += fractions[i] as number
-    if (turn < sum) return i
-  }
-  return fractions.length - 1
 }
 
 /** Where a tooltip sits along its plot, so it never runs off the tile: under the point, kept inside. */
@@ -166,91 +125,6 @@ export function cpuTip(point: { at: number; cpu: number }, of: number): Tip {
 
 export function memoryTip(point: { at: number; rss: number }, of: number): Tip {
   return { value: sizeSaid(point.rss), detail: of ? `${percent(point.rss / of)} of ${sizeSaid(of)}` : '', note: clock(point.at) }
-}
-
-/* ---- the disk, as a doughnut ---- */
-
-/** The doughnut's hole, as a share of its radius. */
-export const HOLE = 0.66
-
-export type SegmentKey = 'frame' | 'modules' | 'logs' | 'worktrees' | 'other'
-
-export interface Segment {
-  key: SegmentKey
-  /** Said in full, in the tooltip and the list. */
-  label: string
-  /** Short enough for a tooltip's line. */
-  name: string
-  /** Short enough for the doughnut's hole. */
-  short: string
-  bytes: number
-  fraction: number
-}
-
-/** One plain name for each part, said everywhere; `short` names it in the doughnut's hole. */
-const NAMES: Record<SegmentKey, { name: string; short: string }> = {
-  frame: { name: 'Database', short: 'Database' },
-  modules: { name: 'Modules', short: 'Modules' },
-  logs: { name: 'Logs', short: 'Logs' },
-  worktrees: { name: 'Agent worktrees', short: 'Worktrees' },
-  other: { name: 'Other', short: 'Other' },
-}
-
-/** What Kehikot takes on the disk, one segment per consumer, the biggest first; nothing of size 0. */
-export function diskSegments(disk: Disk): Segment[] {
-  const bytes: Record<SegmentKey, number> = { frame: 0, modules: 0, logs: 0, worktrees: 0, other: 0 }
-  for (const use of disk.uses) {
-    const key: SegmentKey =
-      use.kind === 'worktrees' ? 'worktrees' : use.kind === 'logs' ? 'logs' : /database/.test(use.label) ? 'frame' : use.label === 'Installed modules' ? 'modules' : 'other'
-    bytes[key] += use.bytes
-  }
-  const total = Object.values(bytes).reduce((sum, n) => sum + n, 0)
-  if (!total) return []
-  return (Object.keys(bytes) as SegmentKey[])
-    .filter((key) => bytes[key] > 0)
-    .map((key) => ({
-      key,
-      label: NAMES[key].name,
-      name: NAMES[key].name,
-      short: NAMES[key].short,
-      bytes: bytes[key],
-      fraction: bytes[key] / total,
-    }))
-    .sort((a, b) => b.bytes - a.bytes)
-}
-
-/** The tooltip: the name, then "120 GB · 94%". */
-export function segmentTip(one: Segment): Tip {
-  return { value: clip(one.name), detail: `${sizeSaid(one.bytes)} · ${percent(one.fraction)}`, note: '' }
-}
-
-/** One consumer in a line: "Agent worktrees · 120 GB · 94%". */
-export const segmentSaid = (one: Segment): string => `${one.label} · ${sizeSaid(one.bytes)} · ${percent(one.fraction)}`
-
-/** The doughnut as a sentence: every segment, its size and its share. */
-export function segmentsSaid(segments: readonly Segment[]): string {
-  if (!segments.length) return 'Kehikot’s folders are being measured.'
-  const total = segments.reduce((sum, one) => sum + one.bytes, 0)
-  return `Kehikot uses ${sizeSaid(total)}: ${segments.map(segmentSaid).join('; ')}.`
-}
-
-/** The Disk tile's two lines: what the number is, and what is left. Low space leads with how full the disk is. */
-export function diskWords(disk: Disk, segments: readonly Segment[], low: boolean): { value: string; sub: string } {
-  const used = segments.reduce((sum, one) => sum + one.bytes, 0)
-  const free = disk.free === null ? null : `${sizeSaid(disk.free)} free`
-  if (disk.free === null || !disk.total) return { value: used ? `Kehikot uses ${sizeSaid(used)}` : '—', sub: used ? 'free space unknown' : 'measuring' }
-  if (low) return { value: `Disk ${percent(1 - disk.free / disk.total)} full`, sub: `${free}${used ? ` · Kehikot uses ${sizeSaid(used)}` : ''}` }
-  return { value: used ? `Kehikot uses ${sizeSaid(used)}` : `${free}`, sub: used ? `${free} on this disk` : `of ${sizeSaid(disk.total)}` }
-}
-
-/**
- * The biggest segment's short label for the doughnut's hole, when it fits a doughnut `size` px across
- * at about 5.5 px a character (9 px text); null when it does not.
- */
-export function centreLabel(segments: readonly Segment[], size: number, charPx = 5.5): string | null {
-  const big = segments[0]
-  if (!big) return null
-  return big.short.length * charPx <= size * HOLE * 0.9 ? big.short : null
 }
 
 /** The top of a y-axis: a round number at or above the highest value. */

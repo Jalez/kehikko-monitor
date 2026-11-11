@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { footerItemsSchema } from 'kehikot-module-protocol'
 
-import { EVERY_MS, Sampler, hostPorts, parseDf, parseDu, registered, worktreeRoots, type Deps } from '../health/sampler.ts'
+import { EVERY_MS, Sampler, hostPorts, registered, type Deps } from '../health/sampler.ts'
 import { footerItems } from '../src/footer.ts'
 import {
   BUILD_MARK,
@@ -168,29 +168,29 @@ describe('judging', () => {
   })
 
   test('every view of the tool answers, and before a sample it says to ask again', () => {
-    for (const view of ['now', 'processes', 'disk'] as const) expect(healthSaid(snapshotOf(NOW), NOW, view).length).toBeGreaterThan(20)
+    for (const view of ['now', 'processes'] as const) expect(healthSaid(snapshotOf(NOW), NOW, view).length).toBeGreaterThan(20)
     expect(healthSaid({ ...snapshotOf(NOW), at: 0 }, NOW)).toContain('Ask again')
   })
 
   test('Health says nothing of calls or restarts any more, and the old views say so', () => {
-    for (const view of ['now', 'processes', 'disk'] as const) expect(healthSaid(snapshotOf(NOW), NOW, view).toLowerCase()).not.toMatch(/restart|p95|calls? (take|fail)|starts/)
+    for (const view of ['now', 'processes'] as const) expect(healthSaid(snapshotOf(NOW), NOW, view).toLowerCase()).not.toMatch(/restart|p95|calls? (take|fail)|starts/)
     expect(goneSaid('calls')).toContain('no longer tracks call times')
     expect(goneSaid('restarts')).toContain('no longer tracks restarts')
+    expect(goneSaid('disk')).toContain('moved to the Worktrees module')
     expect(healthSaid(snapshotOf(NOW), NOW)).toContain('Diff crashed in the last hour.')
   })
 })
 
 describe('the footer’s health', () => {
   const base = { paused: false, rows: [], repeating: 0, budgets: [], gap: false, problem: null }
-  test('the worst module, CPU as a meter of the cores and memory; a nearly full disk too', () => {
+  test('the worst module, CPU as a meter of the cores and memory; nothing of the disk', () => {
     const snapshot = snapshotOf(NOW)
-    snapshot.disk.free = 20e9
     const items = footerItems({ ...base, health: { snapshot, judged: judged(snapshot, NOW) } })
     expect(footerItemsSchema.safeParse(items).success).toBe(true)
     expect(items.find((i) => i.id === 'worst')).toMatchObject({ kind: 'text', text: 'Diff: crashed in the last hour', level: 'critical' })
     expect(items.find((i) => i.id === 'cpu')).toMatchObject({ kind: 'meter', label: 'CPU', text: '134% · 10 cores' })
     expect(items.find((i) => i.id === 'memory')).toMatchObject({ text: '960 MB memory' })
-    expect(items.find((i) => i.id === 'disk')).toMatchObject({ level: 'critical' })
+    expect(items.find((i) => i.id === 'disk')).toBeUndefined()
     expect(items.at(-1)).toMatchObject({ id: 'clear' })
   })
 
@@ -208,16 +208,11 @@ describe('the sampler', () => {
   afterAll(() => rmSync(home, { recursive: true, force: true }))
   const machine = join(home, 'Library', 'Application Support', 'Kehikot')
   mkdirSync(join(machine, 'modules'), { recursive: true })
-  mkdirSync(join(machine, 'installed'), { recursive: true })
   writeFileSync(join(machine, 'modules', 'kehikot.kanban.json'), JSON.stringify({ url: 'http://127.0.0.1:4180', dir: '/x' }))
   writeFileSync(join(machine, 'modules', 'roadmap.diff.json'), JSON.stringify({ url: 'http://127.0.0.1:4190', dir: '/y' }))
-  writeFileSync(join(machine, 'frame.sqlite'), 'x'.repeat(2048))
   const logs = join(home, 'Library', 'Logs', 'Kehikot', 'modules')
   mkdirSync(logs, { recursive: true })
   writeFileSync(join(logs, 'kehikot.kanban.log'), `${RUN_MARK}${new Date(NOW - 60_000).toISOString()} ---\nready\n`)
-  const trees = join(home, 'Projects', 'app', '.claude', 'worktrees')
-  mkdirSync(join(trees, 'one', 'node_modules'), { recursive: true })
-  mkdirSync(join(trees, 'two'), { recursive: true })
 
   let clock = NOW
   let cpu = 0
@@ -233,29 +228,23 @@ describe('the sampler', () => {
       ran.push(file === 'nice' ? `nice ${args[2]}` : file)
       if (file === 'ps') return [`1 0 1000 0:00`, `500 1 204800 0:${cpu.toFixed(2)}`, `501 500 102400 0:${cpu.toFixed(2)}`, `600 500 51200 0:${(cpu * 2).toFixed(2)}`, `900 1 40960 0:00.10`].join('\n')
       if (file === 'lsof') return 'p500\nn127.0.0.1:4170\np600\nn127.0.0.1:4180\n'
-      if (file === 'df') return 'Filesystem 1024-blocks Used Available Capacity\n/dev/disk3 1000000 900000 100000 90% /'
-      if (file === 'nice') return `${args.slice(4).map((path) => `1024\t${path}`).join('\n')}\n`
       throw new Error(`not expected: ${file}`)
     },
   }
 
-  test('registry, host ports, du and df are read as they are printed', () => {
+  test('registry and host ports are read as they are printed', () => {
     /* `roadmap.diff.json` registers kehikot.diff: the old spelling is the same module. */
     expect(new Map(registered(join(machine, 'modules')))).toEqual(new Map([['kehikot.kanban', 4180], ['kehikot.diff', 4190]]))
     expect(hostPorts({ KEHIKOT_ORIGINS: 'http://127.0.0.1:4170,http://localhost:4171' })).toEqual([4170, 4171])
-    expect(parseDu('8\t/a\n16\t/b c\n').get('/b c')).toBe(16 * 1024)
-    expect(parseDf('h\n/dev/x 100 50 40 50% /')).toEqual({ total: 102400, free: 40960 })
-    expect(worktreeRoots(home)).toEqual([trees])
   })
 
-  test('CPU is the time used between two samples, each module counted once; disk and Monitor itself', async () => {
+  test('CPU is the time used between two samples, each module counted once; Monitor itself; no disk measured', async () => {
     const sampler = new Sampler(deps)
     try {
       await sampler.snapshot()
       clock += EVERY_MS
       cpu = 1
       const snap = await sampler.snapshot()
-      await sampler.settled()
       const kanban = snap.modules.find((m) => m.id === 'kehikot.kanban')!
       const host = snap.modules.find((m) => m.id === 'kehikko')!
       /* Kanban's server (600) used 2 s in 5 s; Kehikot (500, 501) used 1 s each, without Kanban's. */
@@ -266,10 +255,8 @@ describe('the sampler', () => {
       expect(kanban).toMatchObject({ running: true, crashedAt: [] })
       expect(snap.modules.find((m) => m.id === 'kehikot.diff')).toMatchObject({ running: false, points: [] })
       expect(snap.self).toMatchObject({ rss: 40960 * 1024 })
-      const disk = (await sampler.snapshot()).disk
-      expect(disk.free).toBe(100000 * 1024)
-      expect(disk.uses.find((use) => use.kind === 'worktrees')).toMatchObject({ count: 2, withModules: 1, bytes: 1024 * 1024 })
-      expect(disk.uses.some((use) => use.label === 'Kehikot’s database')).toBe(true)
+      expect('disk' in (await sampler.snapshot())).toBe(false)
+      expect(ran.some((one) => one === 'df' || one.startsWith('nice'))).toBe(false)
       /* lsof is not asked again before LISTEN_MS while every server is still there. */
       expect(ran.filter((one) => one === 'lsof')).toHaveLength(1)
     } finally {

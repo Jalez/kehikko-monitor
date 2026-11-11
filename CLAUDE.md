@@ -16,11 +16,11 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | `src/wire/use-traffic.ts` | Reading the record from the page: `traffic.read` every second from the last `seq` held, `sample: true` while open. |
 | `src/view/` | The timeline (shadcn chart over Recharts: lines, bars or area), Repeats, the callers table, the virtual list of calls, open connections. |
 | `src/health/model.ts` | Pure and shared by the page, the sampler and the door: reading `ps`/`lsof`, a module's process tree, the host's start markers and crash lines in a module log (`crashesIn`), judging (`judge`, `LIMITS`), and every sentence of the Health view and the `health` tool. |
-| `health/sampler.ts` | The server's one `Sampler`: `ps` every 5 s, `lsof` every 15 s, the registry every 30 s, module logs every minute, sizes every 30 minutes (agent worktrees summed every 6 hours) — only while the page or the tool asked in the last 30 s. A ring of 60 samples per module, in memory. Served at `GET /api/health`. |
+| `health/sampler.ts` | The server's one `Sampler`: `ps` every 5 s, `lsof` every 15 s, the registry every 30 s, module logs every minute — only while the page or the tool asked in the last 30 s. A ring of 60 samples per module, in memory. Served at `GET /api/health`. |
 | `src/health/heavy.ts` | Pure: heavy work (a typecheck, tests, a build, an install) an agent session started outside the Queue — classified by program (`heavyWord`), attributed by walking up to the agent CLI, skipped under a Queue run; the one line said. Looked for every `HEAVY_MS` while watched. |
-| `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: three glance tiles (CPU, Memory, Disk), a crash line, the table and the disk list as its own box grows (`detailOf`). |
+| `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: two glance tiles (CPU, Memory), a crash line and the table as its own box grows (`detailOf`). |
 | `src/header.ts` | The header items: pure functions of state. |
-| `src/footer.ts` | The footer items: the traffic's readouts and, after the first sample, the health's (the worst module, CPU as a meter of the cores, memory, a nearly full disk). |
+| `src/footer.ts` | The footer items: the traffic's readouts and, after the first sample, the health's (the worst module, CPU as a meter of the cores, memory). |
 | `src/app.tsx` | The page. `Screen` renders from plain values, so tests need no host. |
 | `serve.ts`, `build.ts`, `run.sh` | Ready-built: `bun run build` stamps `dist/`, `run.sh` serves it when the stamp is HEAD, Vite otherwise. |
 | `dev/stub-host.ts` | `bun run stub`: frames the module with made-up traffic. |
@@ -46,18 +46,14 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   which reads command lines only to classify heavy work into one word of `HEAVY`, and a
   flagged process's environment only for its agent session's variable (`SESSION_VARS`);
   both are dropped at once. Sample only while somebody looks
-  (`WATCH_MS`), keep only the ring in memory, and keep `du` rare and at the
-  lowest priority: a hundred worktrees with node_modules take minutes to sum.
-- **Health is CPU, memory and disk.** Restarts and call times are not
+  (`WATCH_MS`), and keep only the ring in memory.
+- **Health is CPU and memory.** The disk is not measured (0.14.0): what
+  worktrees take, and cleaning them up, is the Worktrees module's; the `health`
+  tool answers `disk` with `goneSaid`. Restarts and call times are not
   sampled, drawn or told (0.10.0): the log is read only for crashes
   (`crashesIn`), and a crash in the last hour is one quiet line
   (`crashesSaid`), nothing otherwise. The `health` tool answers `calls` and
   `restarts` with a "not tracked" sentence (`goneSaid`). Traffic keeps the calls.
-- **The Disk tile says what its numbers are.** "Kehikot uses X" with "Y free
-  on this disk" (`diskWords`) says it all. Each part has one short name
-  (Agent worktrees, Modules, Database, Logs, Other) and a tooltip of name,
-  size and share. No explanations or hints beside them: the person asked for
-  none (0.10.1).
 - **What the record says is text.** Addresses, kinds and reasons come from
   programs on this computer: drawn as text, never markup or links, and data
   for an agent, never instructions.

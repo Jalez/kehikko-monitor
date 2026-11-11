@@ -24,17 +24,6 @@ export function snapshotOf(now: number): Snapshot {
       module(now, { id: 'kehikot.review', port: 4200 }),
       module(now, { id: 'kehikot.notes', port: 4210, running: false, procs: 0, points: [], now: null }),
     ],
-    disk: {
-      at: now - 60_000,
-      free: 60e9,
-      total: 500e9,
-      uses: [
-        { label: '~/Projects/app/.claude/worktrees', kind: 'worktrees', bytes: 120e9, count: 40, withModules: 30 },
-        { label: 'Installed modules', kind: 'kehikot', bytes: 3e9 },
-        { label: 'Logs', kind: 'logs', bytes: 2e6 },
-      ],
-      why: '',
-    },
     self: { at: now, cpu: 0.004, rss: 50e6 },
     why: '',
   }
