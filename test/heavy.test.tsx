@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { workQueueSchema } from 'kehikot-module-protocol'
 
 import { heavyOutside, heavyWord, outsideSaid, parseProcLines, sessionFrom, type Outside } from '../src/health/heavy.ts'
 
@@ -132,11 +133,14 @@ describe('the sampler looks, cheaply', () => {
         return ''
       },
     }
+    /* A provider that wants a typecheck at once (made up: Monitor knows none by name). */
+    const descriptor = workQueueSchema.parse({ name: 'Turns', run: { typecheck: 't {command}' }, wants: { typecheck: { sustainedSeconds: 0 } } })
+    deps.ask = async (method) => (method === 'services.find' ? { ok: true, data: { providers: [{ module: 'kehikot.turns', name: 'Turns', descriptor, placed: null }] } } : { ok: true, data: { outcome: 'declined' } })
     const sampler = new Sampler(deps)
     try {
       const first = await sampler.snapshot()
       expect(first.outside).toEqual([{ pid: 300, word: 'tsc', kind: 'typecheck', pcpu: 120, sessionPid: 100, agent: 'claude', session: 'sess-1234-5678' }])
-      clock += 5_000
+      clock += 1_000
       await sampler.snapshot()
       clock += HEAVY_MS
       await sampler.snapshot()

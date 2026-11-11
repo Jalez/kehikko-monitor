@@ -24,6 +24,8 @@ const TURNS = workQueueSchema.parse({
   run: { test: "'/t/bin/turns' run --kind verify -- {command}", typecheck: "'/t/bin/turns' run --kind typecheck -- {command}" },
   tool: 'turns_run',
   marks: ['turns-wrapper'],
+  /* Wanted at once, so these tests are about telling; what is wanted is below. */
+  wants: { test: { minCpu: 50, sustainedSeconds: 0, wholeSuiteOnly: false }, typecheck: { minCpu: 50, sustainedSeconds: 0 } },
 })
 
 interface World {
@@ -169,14 +171,14 @@ describe('telling the session', () => {
     }
   })
 
-  test('no provider, or an older host → the screen says it, and nothing is told', async () => {
+  test('no provider, or an older host → nothing is flagged, and nothing is told', async () => {
     const s = sampler(world({ providers: null }))
     const empty = sampler(world({ providers: [] }))
     try {
       const said = await s.one.snapshot()
       await empty.one.snapshot()
       expect(said.provider).toBeNull()
-      expect(said.outside).toHaveLength(1)
+      expect(said.outside).toEqual([])
       expect(s.notices).toEqual([])
       expect(empty.notices).toEqual([])
     } finally {
@@ -185,11 +187,11 @@ describe('telling the session', () => {
     }
   })
 
-  test('a provider that does not take that kind of work → nothing is told', async () => {
+  test('a provider that does not take that kind of work → not flagged, nothing is told', async () => {
     const s = sampler(world({ procs: '100 1 1.0 claude\n300 100 95.0 bun install\n' }))
     try {
       const said = await s.one.snapshot()
-      expect(said.outside?.[0]?.kind).toBe('install')
+      expect(said.outside).toEqual([])
       expect(s.notices).toEqual([])
     } finally {
       s.done()
@@ -200,6 +202,82 @@ describe('telling the session', () => {
     const s = sampler(world({ procs: '100 1 1.0 claude\n200 100 0 sh -c turns-wrapper x\n300 200 95.0 vitest run\n' }))
     try {
       expect((await s.one.snapshot()).outside).toEqual([])
+      expect(s.notices).toEqual([])
+    } finally {
+      s.done()
+    }
+  })
+})
+
+/* A provider with rules of its own: whole test suites at 50% for 15 s, typechecks and builds at 80% for 10 s, installs left out. */
+const RULED = workQueueSchema.parse({
+  name: 'Turns',
+  run: { test: "'/t/bin/turns' run -- {command}", typecheck: "'/t/bin/turns' run -- {command}", build: "'/t/bin/turns' run -- {command}", install: "'/t/bin/turns' run -- {command}" },
+  marks: ['turns-wrapper'],
+  wants: { test: { minCpu: 50, sustainedSeconds: 15, wholeSuiteOnly: true }, typecheck: { minCpu: 80, sustainedSeconds: 10 }, build: { minCpu: 80, sustainedSeconds: 10 } },
+})
+const ruled = (procs: string) => world({ providers: [{ module: 'kehikot.turns', name: 'Turns', descriptor: RULED, placed: null }], procs })
+const under = (line: string, pcpu: number) => `100 1 1.0 claude\n300 100 ${pcpu} ${line}\n`
+
+describe('only what the provider wants', () => {
+  test('a targeted test run is not flagged, however long and hard it runs', async () => {
+    const s = sampler(ruled(under('bun test test/a.test.tsx test/b.test.tsx', 68)))
+    try {
+      await s.one.snapshot()
+      for (let i = 0; i < 6; i++) expect((await s.after(HEAVY_MS)).outside).toEqual([])
+      expect(s.notices).toEqual([])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('a whole suite at high CPU is flagged once it has held long enough, and told', async () => {
+    const s = sampler(ruled(under('bun test', 68)))
+    try {
+      expect((await s.one.snapshot()).outside).toEqual([])
+      expect((await s.after(10_000)).outside).toEqual([])
+      const said = await s.after(5_000)
+      expect(said.outside?.map((one) => one.word)).toEqual(['bun test'])
+      expect(s.notices).toHaveLength(1)
+    } finally {
+      s.done()
+    }
+  })
+
+  test('an install the provider leaves out is never flagged', async () => {
+    const s = sampler(ruled(under('bun install', 1)))
+    try {
+      await s.one.snapshot()
+      expect((await s.after(60_000)).outside).toEqual([])
+      expect(s.notices).toEqual([])
+    } finally {
+      s.done()
+    }
+  })
+
+  test('a sustained typecheck is flagged', async () => {
+    const s = sampler(ruled(under('node /w/node_modules/typescript/bin/tsc --noEmit', 145)))
+    try {
+      expect((await s.one.snapshot()).outside).toEqual([])
+      expect((await s.after(HEAVY_MS)).outside).toEqual([])
+      expect((await s.after(HEAVY_MS)).outside?.map((one) => one.word)).toEqual(['tsc'])
+      expect(s.notices).toHaveLength(1)
+    } finally {
+      s.done()
+    }
+  })
+
+  test('a short spike is not: dropping below the rule starts the streak over', async () => {
+    const w = ruled(under('tsc --noEmit', 145))
+    const s = sampler(w)
+    try {
+      await s.one.snapshot()
+      w.procs = under('tsc --noEmit', 20)
+      expect((await s.after(HEAVY_MS)).outside).toEqual([])
+      w.procs = under('tsc --noEmit', 145)
+      expect((await s.after(HEAVY_MS)).outside).toEqual([])
+      w.procs = ''
+      expect((await s.after(HEAVY_MS)).outside).toEqual([])
       expect(s.notices).toEqual([])
     } finally {
       s.done()
@@ -241,8 +319,8 @@ describe('Monitor names no provider', () => {
     for (const dir of ['src', 'health']) walk(join(root, dir))
     files.push(...['doors.ts', 'manifest.ts', 'skills.ts', 'serve.ts'].map((name) => join(root, name)))
     for (const file of files) {
-      /* `WORK_QUEUE` and `workQueue…` are the protocol's own names for the service; "a work queue" is said when none is here. */
-      const text = readFileSync(file, 'utf8').replace(/\bWORK_QUEUE\b|\bworkQueue\w*|\bWorkQueue\b|\ba work queue\b/g, '')
+      /* `WORK_QUEUE`, `workQueue…` and `wantsQueued` are the protocol's own names for the service; "a work queue" is said when none is here. */
+      const text = readFileSync(file, 'utf8').replace(/\bWORK_QUEUE\b|\bworkQueue\w*|\bWorkQueue\b|\bwantsQueued\b|\ba work queue\b/g, '')
       expect({ file, queue: /queue/i.test(text) }).toEqual({ file, queue: false })
     }
     expect(WORK_QUEUE).toBe('work.queue')
