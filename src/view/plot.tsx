@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 
 import { fromKeyboard, hideTip, showTip, useTip } from '@/lib/one-tip'
-import { indexAt, PAD_X, segmentAt, stepped, TIP_GAP, tipAlign, tipSide, type Tip } from '@/view/tiles'
+import { indexAt, PAD_X, stepped, TIP_GAP, tipAlign, tipSide, type Tip } from '@/view/tiles'
 
 /**
  * One tile's plot: the chart, the point a person is on, and a small tooltip saying it. The same for a
@@ -25,26 +25,17 @@ export function Plot({
   count,
   kind,
   height,
-  ring = height,
   tip,
   testId,
-  fractions = [],
-  aside,
   children,
 }: {
   said: string
   count: number
-  kind: 'line' | 'bar' | 'ring'
+  kind: 'line' | 'bar'
   /** The plot's height in px. */
   height: number
-  /** A ring's size across, in px; it sits in the middle of the plot's height. */
-  ring?: number
   tip: (index: number) => Tip
   testId: string
-  /** A ring's segments, as shares adding up to 1. */
-  fractions?: readonly number[]
-  /** Beside a ring: its list of segments. */
-  aside?: ReactNode
   children: (active: number | null) => ReactNode
 }) {
   const id = useId()
@@ -67,8 +58,7 @@ export function Plot({
   const point = (event: PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
     const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    const at = kind === 'ring' ? segmentAt(x, y, ring, fractions) : indexAt(x, rect.width, count, kind)
+    const at = indexAt(x, rect.width, count, kind)
     setActive(at)
     if (at === null) hideTip(tipKey)
     else showTip(tipKey, event.currentTarget, { touch: event.pointerType === 'touch' })
@@ -82,7 +72,7 @@ export function Plot({
     else showTip(tipKey, event.currentTarget, { keyboard: true })
   }
 
-  const align = kind === 'ring' ? 'start' : tipAlign(shown ?? 0, count)
+  const align = tipAlign(shown ?? 0, count)
   const across: CSSProperties = align === 'start' ? { left: TIP_GAP } : align === 'end' ? { right: TIP_GAP } : { left: '50%', transform: 'translateX(-50%)' }
   const place: CSSProperties = { ...across, ...(side === 'above' ? { bottom: `calc(100% + ${TIP_GAP}px)` } : { top: `calc(100% + ${TIP_GAP}px)` }) }
   const told = shown === null ? null : tip(shown)
@@ -90,8 +80,8 @@ export function Plot({
   return (
     <div
       ref={box}
-      className={`relative min-w-0 ${kind === 'ring' ? 'flex items-center gap-2' : ''}`}
-      style={{ height, marginInline: kind === 'ring' ? undefined : -PAD_X }}
+      className="relative min-w-0"
+      style={{ height, marginInline: -PAD_X }}
       data-testid={`${testId}-plot`}
       data-kind={kind}
     >
@@ -101,10 +91,10 @@ export function Plot({
         aria-describedby={told ? `${id}-tip` : undefined}
         tabIndex={count ? 0 : -1}
         className="focus-visible:ring-ring shrink-0 touch-pan-y rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-inset"
-        style={kind === 'ring' ? { width: ring, height: ring } : { width: '100%', height: '100%' }}
+        style={{ width: '100%', height: '100%' }}
         onFocus={(event) => {
           if (!count || !fromKeyboard()) return
-          setActive((was) => was ?? (kind === 'ring' ? 0 : count - 1))
+          setActive((was) => was ?? count - 1)
           showTip(tipKey, event.currentTarget, { keyboard: true })
         }}
         onBlur={() => {
@@ -121,7 +111,6 @@ export function Plot({
       >
         {children(shown)}
       </div>
-      {aside}
       <div
         ref={tipBox}
         id={`${id}-tip`}

@@ -138,7 +138,6 @@ describe('the sampler looks, cheaply', () => {
       expect(JSON.stringify(await sampler.snapshot())).not.toContain('GH_TOKEN')
     } finally {
       sampler.stop()
-      await sampler.settled()
       rmSync(home, { recursive: true, force: true })
     }
   })

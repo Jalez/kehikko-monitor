@@ -1,7 +1,6 @@
 import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
 
 import { callerName, spoken } from '../traffic/model.ts'
-import { diskSegments, segmentSaid } from '../view/tiles.ts'
 import { outsideSaid, type Outside } from './heavy.ts'
 
 /**
@@ -173,26 +172,6 @@ export interface ModuleHealth {
   crashedAt: number[]
 }
 
-export interface DiskUse {
-  label: string
-  /** What it is: `kehikot` (the machine folder's parts), `logs`, `worktrees`. */
-  kind: 'kehikot' | 'logs' | 'worktrees'
-  bytes: number
-  /** For worktrees: how many, and how many carry node_modules. */
-  count?: number
-  withModules?: number
-}
-
-export interface Disk {
-  at: number | null
-  /** The volume the home folder is on: free and total bytes. */
-  free: number | null
-  total: number | null
-  uses: DiskUse[]
-  /** A sentence when something could not be measured. */
-  why: string
-}
-
 export interface Snapshot {
   at: number
   /** The computer's cores and memory, for scale. */
@@ -201,7 +180,6 @@ export interface Snapshot {
   /** Seconds between samples. */
   every: number
   modules: ModuleHealth[]
-  disk: Disk
   /** What Monitor itself costs, from the same sample. */
   self: Point | null
   /** A sentence when something could not be looked at (no `ps`, no registry). */
@@ -210,7 +188,7 @@ export interface Snapshot {
   outside?: Outside[]
 }
 
-export const emptySnapshot = (): Snapshot => ({ at: 0, cores: 1, memory: 0, every: 5, modules: [], disk: { at: null, free: null, total: null, uses: [], why: '' }, self: null, why: '' })
+export const emptySnapshot = (): Snapshot => ({ at: 0, cores: 1, memory: 0, every: 5, modules: [], self: null, why: '' })
 
 /* ------------------------------------------------------------------ *
  * Judging: what is worth a word.
@@ -224,8 +202,6 @@ export const LIMITS = {
   cpuCritical: 1.5,
   rssWarn: 1024 ** 3,
   rssCritical: 2 * 1024 ** 3,
-  freeWarn: 0.1,
-  freeCritical: 0.05,
 } as const
 
 const HOUR = 60 * 60_000
@@ -297,15 +273,6 @@ export function totals(snapshot: Snapshot): Totals {
   return { cpu, rss, running, registered: snapshot.modules.filter((module) => module.id !== TRAFFIC_HOST_BY).length }
 }
 
-/** How full the home folder's disk is, judged. */
-export function diskLevel(disk: Disk): Level {
-  if (disk.free === null || !disk.total) return 'normal'
-  const free = disk.free / disk.total
-  return free <= LIMITS.freeCritical ? 'critical' : free <= LIMITS.freeWarn ? 'warn' : 'normal'
-}
-
-export const freeSaid = (disk: Disk): string => (disk.free === null || !disk.total ? 'free space unknown' : `${sizeSaid(disk.free)} free of ${sizeSaid(disk.total)}`)
-
 /* ------------------------------------------------------------------ *
  * Sentences: the chart's words, the footer's and the tool's.
  * ------------------------------------------------------------------ */
@@ -336,13 +303,6 @@ export function crashesSaid(snapshot: Snapshot, now: number): string {
   return said.join('; ')
 }
 
-export function diskSaid(disk: Disk): string {
-  if (disk.at === null) return disk.why || 'Disk use is being measured.'
-  const uses = disk.uses.reduce((sum, use) => sum + use.bytes, 0)
-  const big = [...disk.uses].sort((a, b) => b.bytes - a.bytes)[0]
-  return `${freeSaid(disk)}.${uses ? ` Kehikot uses ${sizeSaid(uses)} of it.` : ''}${big ? ` The biggest: ${big.label}, ${sizeSaid(big.bytes)}.` : ''}`
-}
-
 /** How long ago, said: "4 min ago". */
 export function agoSaid(ms: number, now: number): string {
   const gone = Math.max(0, now - ms)
@@ -362,16 +322,19 @@ export function sizeSaid(bytes: number): string {
  * The `health` tool's answer.
  * ------------------------------------------------------------------ */
 
-export const HEALTH_VIEWS = ['now', 'processes', 'disk'] as const
+export const HEALTH_VIEWS = ['now', 'processes'] as const
 
 /** Views an older agent may still ask for. */
-export const GONE_VIEWS = ['calls', 'restarts'] as const
-export const goneSaid = (view: string): string => `Health no longer tracks ${view === 'calls' ? 'call times or failures' : 'restarts'}. ${view === 'calls' ? 'The traffic tool has the calls.' : 'It says only a module that crashed in the last hour: see now.'}`
+export const GONE_VIEWS = ['calls', 'restarts', 'disk'] as const
+export function goneSaid(view: string): string {
+  if (view === 'disk') return 'Health no longer measures the disk: what worktrees take, and cleaning them up, moved to the Worktrees module (its worktrees tool). Health keeps CPU and memory.'
+  return `Health no longer tracks ${view === 'calls' ? 'call times or failures' : 'restarts'}. ${view === 'calls' ? 'The traffic tool has the calls.' : 'It says only a module that crashed in the last hour: see now.'}`
+}
 export type HealthView = (typeof HEALTH_VIEWS)[number]
 
 /**
  * What is slow or heavy right now, as lines an agent reads. `now` (the default) says the worst first
- * and the totals; the others list every module by one measure, or the disk.
+ * and the totals; `processes` lists every module.
  */
 export function healthSaid(snapshot: Snapshot, now: number, view: HealthView = 'now'): string {
   if (!snapshot.at) return snapshot.why || 'Monitor has not sampled the processes yet. Ask again in a few seconds.'
@@ -389,21 +352,12 @@ export function healthSaid(snapshot: Snapshot, now: number, view: HealthView = '
     lines.push(...(flagged.length ? flagged : all.filter((one) => byId.get(one.id)?.running).slice(0, 5)).map((one) => `- ${one.name}: ${one.said}${one.level === 'critical' ? ' (critical)' : one.level === 'warn' ? ' (warning)' : ''}`))
     const crashed = crashesSaid(snapshot, now)
     const outside = outsideSaid(snapshot.outside ?? [])
-    lines.push('', ...(crashed ? [`${crashed}.`] : []), ...(outside ? [`${outside}.`] : []), `Disk: ${snapshot.disk.at === null ? 'being measured.' : diskSaid(snapshot.disk)}`)
+    if (crashed || outside) lines.push('', ...(crashed ? [`${crashed}.`] : []), ...(outside ? [`${outside}.`] : []))
   }
   if (view === 'processes') {
     lines.push(`${cpuSaid(snapshot)} ${memorySaid(snapshot)} Sampled every ${snapshot.every} s; CPU is the average of the last 30 seconds.`, '')
     const ordered = [...snapshot.modules].sort((a, b) => average(b.points.slice(-6)) - average(a.points.slice(-6)) || (b.now?.rss ?? 0) - (a.now?.rss ?? 0))
     lines.push(...ordered.map((m) => `- ${row(m)}`))
-  }
-  if (view === 'disk') {
-    lines.push(diskSaid(snapshot.disk))
-    if (snapshot.disk.at !== null) lines.push(`Measured ${agoSaid(snapshot.disk.at, now)}; sizes only, every 30 minutes while Monitor is watched.`)
-    if (snapshot.disk.why) lines.push(snapshot.disk.why)
-    const segments = diskSegments(snapshot.disk)
-    lines.push('', ...segments.map((one) => `- ${segmentSaid(one)}`))
-    const trees = worktreesOf(snapshot.disk)
-    if (trees.count) lines.push(`${trees.count} agent worktrees, ${trees.withModules} with node_modules.`)
   }
   if (snapshot.self) lines.push('', `Monitor itself: ${percent(snapshot.self.cpu)} CPU, ${sizeSaid(snapshot.self.rss)}.`)
   return lines.join('\n')
@@ -436,7 +390,7 @@ export interface Box {
  * How much the Health view shows, from its container's own size (as Test runs does):
  * - `glance` — under 240 px tall: the tiles only.
  * - `list`   — under 380 px wide or 400 px tall: the tiles and the modules worth a look.
- * - `full`   — the tiles, every running module in a table, and the disk.
+ * - `full`   — the tiles, and every running module in a table.
  */
 export type Detail = 'glance' | 'list' | 'full'
 
@@ -445,15 +399,4 @@ export function detailOf(box: Box | null): Detail {
   if (box.height < 240) return 'glance'
   if (box.width < 380 || box.height < 400) return 'list'
   return 'full'
-}
-
-/** Worktree folders, added up: how many, how many with node_modules, and their size so far. */
-export function worktreesOf(disk: Disk): { count: number; withModules: number; bytes: number; roots: number } {
-  const roots = disk.uses.filter((use) => use.kind === 'worktrees')
-  return {
-    count: roots.reduce((sum, use) => sum + (use.count ?? 0), 0),
-    withModules: roots.reduce((sum, use) => sum + (use.withModules ?? 0), 0),
-    bytes: roots.reduce((sum, use) => sum + use.bytes, 0),
-    roots: roots.length,
-  }
 }

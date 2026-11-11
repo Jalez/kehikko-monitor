@@ -1,56 +1,30 @@
 import { useRef } from 'react'
-import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
 import { outsideSaid } from '@/health/heavy'
 import {
-  agoSaid,
   average,
   cpuSaid,
   crashesSaid,
   detailOf,
-  diskLevel,
-  diskSaid,
   memorySaid,
   percent,
   sizeSaid,
   totals,
   totalsOver,
-  worktreesOf,
   type Judged,
   type Level,
   type Box,
   type Snapshot,
 } from '@/health/model'
 import { Plot } from '@/view/plot'
-import {
-  centreLabel,
-  cpuTip,
-  diskSegments,
-  diskWords,
-  HEAD_HEIGHT,
-  HOLE,
-  LEGEND_ROW,
-  memoryTip,
-  niceTop,
-  PAD_X,
-  PAD_Y,
-  ringRow,
-  ROW_GAP,
-  SUB_HEIGHT,
-  segmentSaid,
-  segmentsSaid,
-  segmentTip,
-  tileLayout,
-  type Segment,
-  type TileLayout,
-  type SegmentKey,
-} from '@/view/tiles'
+import { cpuTip, HEAD_HEIGHT, memoryTip, niceTop, PAD_X, PAD_Y, ROW_GAP, SUB_HEIGHT, tileLayout, type TileLayout } from '@/view/tiles'
 import { useBox } from '@/view/use-box'
 
 /**
  * The Health view: how heavy and how well Kehikot and its modules are running on this computer, at
- * a glance. Three tiles — CPU, memory and disk — each with its number in words and
+ * a glance. Two tiles — CPU and memory — each with its number in words and
  * a small chart that is an image of the same sentence; then, as the container grows, one line when a module
  * crashed in the last hour and a table of every running module. The page measures its own box (`useBox`), as
  * Test runs does, because a container on a canvas is sized by the person, not by the window.
@@ -60,8 +34,6 @@ import { useBox } from '@/view/use-box'
 
 const CPU: ChartConfig = { cpu: { label: 'CPU (cores)', color: 'var(--series-1)' } }
 const MEMORY: ChartConfig = { gb: { label: 'Memory (GB)', color: 'var(--series-3)' } }
-/* One colour per consumer of the disk, never by order: a segment keeps its colour as sizes change. */
-const DISK: Record<SegmentKey, string> = { worktrees: 'var(--series-4)', modules: 'var(--series-1)', frame: 'var(--series-3)', logs: 'var(--series-5)', other: 'var(--series-other)' }
 
 const LEVEL_TONE: Record<Level, string> = { normal: 'text-muted-foreground', warn: 'text-amber-700 dark:text-amber-400', critical: 'text-destructive' }
 const LEVEL_SAID: Record<Level, string> = { normal: '', warn: 'warning', critical: 'critical' }
@@ -111,7 +83,6 @@ function Shown({ snapshot, judged, problem, now, detail, width }: { snapshot: Sn
         </p>
       ) : null}
             {detail === 'full' ? <Modules snapshot={snapshot} judged={judged} /> : null}
-      {detail === 'full' ? <DiskList snapshot={snapshot} now={now} /> : null}
       {detail === 'full' && snapshot.self ? (
         <p className="text-muted-foreground text-xs" data-testid="self">
           Monitor itself: {percent(snapshot.self.cpu)} CPU, {sizeSaid(snapshot.self.rss)}. It samples every {snapshot.every} s only while this page or an agent is looking.
@@ -125,12 +96,9 @@ function Tiles({ snapshot, width }: { snapshot: Snapshot; width: number | null }
   const layout = tileLayout(width)
   const sum = totals(snapshot)
   const over = totalsOver(snapshot).map((one) => ({ at: one.at, cpu: Math.round(one.cpu * 100) / 100, rss: one.rss, gb: Math.round((one.rss / 1e9) * 100) / 100 }))
-  const segments = diskSegments(snapshot.disk)
-  const disk = diskLevel(snapshot.disk)
-  const words = diskWords(snapshot.disk, segments, disk !== 'normal')
   return (
     /* No cards: the grid's 1 px gap shows the border colour between tiles, which stand on the page's own background. */
-    <div className="bg-border grid min-w-0 shrink-0 grid-cols-1 gap-px @min-[360px]:grid-cols-2 @min-[640px]:grid-cols-3" data-testid="tiles" data-axes={layout.axes} data-compact={layout.compact}>
+    <div className="bg-border grid min-w-0 shrink-0 grid-cols-1 gap-px @min-[360px]:grid-cols-2" data-testid="tiles" data-axes={layout.axes} data-compact={layout.compact}>
       <Tile layout={layout} title="CPU" value={percent(sum.cpu)} sub={`${sum.running} running · ${snapshot.cores} cores`} testId="tile-cpu">
         <Plot said={cpuSaid(snapshot)} count={over.length > 1 ? over.length : 0} kind="line" height={layout.plot} tip={(i) => cpuTip(over[i] as (typeof over)[number], snapshot.cores)} testId="tile-cpu">
           {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="cpu" config={CPU} axes={layout.axes} active={active} format={(v) => percent(v)} /> : null)}
@@ -139,29 +107,6 @@ function Tiles({ snapshot, width }: { snapshot: Snapshot; width: number | null }
       <Tile layout={layout} title="Memory" value={sizeSaid(sum.rss)} sub={snapshot.memory ? `of ${sizeSaid(snapshot.memory)}` : 'resident'} testId="tile-memory">
         <Plot said={memorySaid(snapshot)} count={over.length > 1 ? over.length : 0} kind="line" height={layout.plot} tip={(i) => memoryTip(over[i] as (typeof over)[number], snapshot.memory)} testId="tile-memory">
           {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="gb" config={MEMORY} axes={layout.axes} active={active} format={(v) => `${v} GB`} /> : null)}
-        </Plot>
-      </Tile>
-      <Tile
-        layout={layout}
-        className="@min-[360px]:col-span-2 @min-[640px]:col-span-1"
-        title="Disk"
-        value={words.value}
-        sub={words.sub}
-        subTone={disk !== 'normal' ? 'text-destructive' : undefined}
-        testId="tile-disk"
-      >
-        <Plot
-          said={`${diskSaid(snapshot.disk)} ${segmentsSaid(segments)}`}
-          count={segments.length}
-          kind="ring"
-          height={ringRow(layout, segments.length)}
-          ring={layout.ring}
-          fractions={segments.map((one) => one.fraction)}
-          tip={(i) => segmentTip(segments[i] as Segment)}
-          testId="tile-disk"
-          aside={<Segments segments={segments} shown={layout.legend} />}
-        >
-          {(active) => (segments.length ? <Doughnut segments={segments} size={layout.ring} active={active} /> : null)}
         </Plot>
       </Tile>
     </div>
@@ -201,45 +146,6 @@ function AreaPlot<T extends { at: number }>({ data, dataKey, config, axes, activ
         {on ? <ReferenceDot x={on.at} y={Number(on[dataKey])} r={3} fill={`var(--color-${dataKey})`} stroke="var(--background)" /> : null}
       </AreaChart>
     </ChartContainer>
-  )
-}
-
-function Doughnut({ segments, size, active }: { segments: readonly Segment[]; size: number; active: number | null }) {
-  const centre = centreLabel(segments, size)
-  return (
-    <div className="relative size-full">
-      <PieChart width={size} height={size} accessibilityLayer={false}>
-        <Pie data={segments as Segment[]} dataKey="bytes" nameKey="short" innerRadius={(size / 2) * HOLE} outerRadius={size / 2 - 1} startAngle={90} endAngle={-270} stroke="var(--background)" strokeWidth={1} isAnimationActive={false}>
-          {segments.map((one, i) => (
-            <Cell key={one.key} fill={DISK[one.key]} fillOpacity={active === null || active === i ? 1 : 0.4} />
-          ))}
-        </Pie>
-      </PieChart>
-      {centre ? (
-        <span className="text-muted-foreground pointer-events-none absolute inset-0 flex items-center justify-center text-[9px] font-medium" data-testid="tile-disk-centre">
-          {centre}
-        </span>
-      ) : null}
-    </div>
-  )
-}
-
-/** The doughnut in words: each consumer and its size. Beside it when the tile has room, for screen readers only when not. */
-function Segments({ segments, shown }: { segments: readonly Segment[]; shown: boolean }) {
-  return (
-    <ul aria-label="What Kehikot uses on the disk" className={shown ? 'flex min-w-0 flex-1 flex-col text-[11px] tabular-nums' : 'sr-only'} data-testid="tile-disk-segments">
-      {segments.map((one) => (
-        <li key={one.key} className="flex min-w-0 items-center gap-1.5" style={shown ? { height: LEGEND_ROW, lineHeight: `${LEGEND_ROW}px` } : undefined}>
-          <span aria-hidden className="size-2 shrink-0 rounded-[2px]" style={{ background: DISK[one.key] }} />
-          <span className="min-w-0 flex-1 truncate" title={one.label}>
-            {one.label}
-          </span>
-          <span className="text-muted-foreground shrink-0">
-            {sizeSaid(one.bytes)} · {percent(one.fraction)}
-          </span>
-        </li>
-      ))}
-    </ul>
   )
 }
 
@@ -311,34 +217,6 @@ function Modules({ snapshot, judged }: { snapshot: Snapshot; judged: readonly Ju
         </table>
       </div>
       {stopped > 0 ? <p className="text-muted-foreground text-xs">{stopped} more registered modules are not running.</p> : null}
-    </section>
-  )
-}
-
-function DiskList({ snapshot, now }: { snapshot: Snapshot; now: number }) {
-  const { disk } = snapshot
-  const segments = diskSegments(disk)
-  const trees = worktreesOf(disk)
-  return (
-    <section aria-labelledby="disk-title" className="flex min-w-0 flex-col gap-1">
-      <h2 id="disk-title" className="text-sm font-medium">
-        What Kehikot uses on the disk
-      </h2>
-      <p className="text-muted-foreground text-xs">
-        {diskSaid(disk)}
-        {disk.at !== null ? ` Measured ${agoSaid(disk.at, now)}; sizes only.` : ''}
-        {disk.why ? ` ${disk.why}` : ''}
-      </p>
-      <ul className="flex flex-col gap-0.5 text-xs tabular-nums" data-testid="disk">
-        {segments.map((one) => (
-          <li key={one.key} className="flex min-w-0 gap-2">
-            <span className="truncate" title={segmentSaid(one)}>
-              {segmentSaid(one)}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {trees.count ? <p className="text-muted-foreground text-xs">{trees.count} agent worktrees, {trees.withModules} with node_modules.</p> : null}
     </section>
   )
 }

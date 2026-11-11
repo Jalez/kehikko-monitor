@@ -59,7 +59,7 @@ describe('the doors', () => {
     expect((await answer('POST', '/api/health', none, {}, null))?.status).toBe(405)
   })
 
-  test('health says what is heavy, the worst first, a crash and the disk in words; nothing of calls or restarts', async () => {
+  test('health says what is heavy, the worst first and a crash in words; nothing of calls, restarts or the disk', async () => {
     refusal = null
     asked.length = 0
     HEALTH.snapshot = async () => snapshotOf(NOW)
@@ -70,23 +70,21 @@ describe('the doors', () => {
     expect(said).toContain('Diff crashed in the last hour.')
     expect(said).toContain('Monitor itself')
     expect(said).not.toMatch(/restart|p95|call times/i)
-    const disk = (await rpc('tools/call', { name: 'health', arguments: { view: 'disk' } })).result.content![0]!.text
-    expect(disk).toContain('40 agent worktrees, 30 with node_modules')
-    expect(disk).toContain('Agent worktrees · 120 GB · 98%')
-    expect(disk).not.toContain('not of the disk')
-    expect(disk).not.toContain('Clean up')
+    expect(said).not.toMatch(/disk/i)
     /* Health reads no traffic record any more. */
     expect(asked).toHaveLength(0)
   })
 
-  test('the calls and restarts views are not tracked any more, and say so in a line', async () => {
+  test('the calls, restarts and disk views are not tracked any more, and say so in a line', async () => {
     HEALTH.snapshot = async () => snapshotOf(NOW)
     const tool = tools().find((one) => one.name === 'health')!
-    expect((tool.inputSchema.properties.view as { enum: string[] }).enum).toEqual(['now', 'processes', 'disk'])
+    expect((tool.inputSchema.properties.view as { enum: string[] }).enum).toEqual(['now', 'processes'])
     const calls = (await rpc('tools/call', { name: 'health', arguments: { view: 'calls' } })).result.content![0]!.text
     expect(calls).toBe('Health no longer tracks call times or failures. The traffic tool has the calls.')
     const restarts = (await rpc('tools/call', { name: 'health', arguments: { view: 'restarts' } })).result.content![0]!.text
     expect(restarts).toContain('no longer tracks restarts')
+    const disk = (await rpc('tools/call', { name: 'health', arguments: { view: 'disk' } })).result.content![0]!.text
+    expect(disk).toContain('moved to the Worktrees module')
   })
 
   test('traffic reads the host’s record as Monitor, about no project, and says what repeats', async () => {

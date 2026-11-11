@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { cpus, homedir, totalmem } from 'node:os'
 import { join } from 'node:path'
 
 import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
 
 import { heavyOutside, parseProcLines, sessionFrom, type Outside } from '../src/health/heavy.ts'
-import { crashesIn, parseListeners, parsePs, treeOf, type Disk, type DiskUse, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
+import { crashesIn, parseListeners, parsePs, treeOf, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
 
 /**
  * The health of the processes Kehikot runs on this computer, sampled by Monitor's server.
@@ -29,10 +29,8 @@ import { crashesIn, parseListeners, parsePs, treeOf, type Disk, type DiskUse, ty
  * - `ps -A -o pid=,ppid=,pcpu=,args=` every `HEAVY_MS`: heavy work an agent session started outside
  *   the Queue. Each command line is only classified into one word (`heavyWord`) and dropped; for a
  *   process so flagged, its `ps -E` once, for the agent CLI's session variable alone.
- * - Sizes, every `DISK_MS`: `df` for the home folder's disk, `stat` for frame.sqlite, `du` at the
- *   lowest priority for the installed modules, versions and logs; agent worktrees are counted
- *   every time and summed every `WORKTREES_MS`. Sizes only:
- *   no file's contents are read.
+ *
+ * Nothing on the disk is measured: what worktrees and folders take is the Worktrees module's, since Monitor 0.14.0.
  *
  * Nothing is written anywhere.
  */
@@ -43,15 +41,9 @@ export const RING = 60
 export const LISTEN_MS = 15_000
 export const REGISTRY_MS = 30_000
 export const LOGS_MS = 60_000
-export const DISK_MS = 30 * 60_000
 /** How often heavy work outside the Queue is looked for (`src/health/heavy.ts`). */
 export const HEAVY_MS = 15_000
-/** How often agent worktrees are summed with `du`: rarely, because it reads every file's size in them. */
-export const WORKTREES_MS = 6 * 60 * 60_000
 const DAY_MS = 24 * 60 * 60_000
-
-/** Where a person keeps code, under the home folder: agent worktrees are looked for here, three folders deep. */
-export const CODE_DIRS = ['Projects', 'projects', 'src', 'code', 'dev', 'Developer', 'repos', 'git', 'work']
 
 export interface Deps {
   run: (file: string, args: string[], timeoutMs: number) => Promise<string>
@@ -75,7 +67,7 @@ export const DEPS: Deps = {
   run,
   now: () => Date.now(),
   env: process.env,
-  home: homedir(), // kehikot-storage: allow read-only: where Kehikot's machine folder, its logs and agent worktrees are, for their sizes
+  home: homedir(), // kehikot-storage: allow read-only: where Kehikot's module registry and its logs are
   cores: cpus().length || 1,
   memory: totalmem(),
   pid: process.pid,
@@ -87,9 +79,6 @@ export function places(deps: Pick<Deps, 'env' | 'home'>) {
   return {
     machine,
     registry: deps.env.KEHIKOT_MODULES_DIR || join(machine, 'modules'),
-    installed: deps.env.KEHIKOT_INSTALLS_DIR || join(machine, 'installed'),
-    versions: deps.env.KEHIKOT_VERSIONS_DIR || join(machine, 'versions'),
-    frame: deps.env.KEHIKOT_FRAME_DB || join(machine, 'frame.sqlite'),
     logs: deps.env.KEHIKOT_LOGS_DIR || join(deps.home, 'Library', 'Logs', 'Kehikot'),
   }
 }
@@ -132,70 +121,6 @@ export function hostPorts(env: Record<string, string | undefined>): number[] {
   return out
 }
 
-/** Folders of agent worktrees: `*-worktrees`, and `.claude/worktrees` inside a repository, up to three folders under a code folder. */
-export function worktreeRoots(home: string, dirs: readonly string[] = CODE_DIRS, depth = 3): string[] {
-  const found: string[] = []
-  const walk = (dir: string, left: number) => {
-    let entries: import('node:fs').Dirent[] = []
-    try {
-      entries = readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const path = join(dir, entry.name)
-      if (entry.name.endsWith('-worktrees')) found.push(path)
-      else if (entry.name === '.claude') {
-        if (existsSync(join(path, 'worktrees'))) found.push(join(path, 'worktrees'))
-      } else if (left > 1 && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'dist') walk(path, left - 1)
-    }
-  }
-  /* On a disk that ignores case, Projects and projects are one folder: walk each folder once. */
-  const walked = new Set<string>()
-  for (const dir of dirs) {
-    let real: string
-    try {
-      real = realpathSync.native(join(home, dir))
-    } catch {
-      continue
-    }
-    if (walked.has(real)) continue
-    walked.add(real)
-    walk(join(home, dir), depth)
-  }
-  return found
-}
-
-/** `du -sk` lines: KiB and a path. */
-export function parseDu(text: string): Map<string, number> {
-  const out = new Map<string, number>()
-  for (const line of text.split('\n')) {
-    const tab = line.indexOf('\t')
-    if (tab > 0) out.set(line.slice(tab + 1), Number(line.slice(0, tab)) * 1024)
-  }
-  return out
-}
-
-/** `df -k <path>`'s last line: total and free bytes. */
-export function parseDf(text: string): { total: number; free: number } | null {
-  const line = text.trim().split('\n').at(-1) ?? ''
-  const cols = line.split(/\s+/)
-  const total = Number(cols[1]) * 1024
-  const free = Number(cols[3]) * 1024
-  return Number.isFinite(total) && Number.isFinite(free) && total > 0 ? { total, free } : null
-}
-
-const sizeOf = (path: string): number => {
-  try {
-    return statSync(path).size
-  } catch {
-    return 0
-  }
-}
-
-const tilde = (path: string, home: string) => (path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path)
-
 export class Sampler {
   private readonly deps: Deps
   private watchedUntil = 0
@@ -218,13 +143,10 @@ export class Sampler {
   private logs = new Map<string, { size: number; mtime: number; crashes: number[] }>()
   private logsAt = 0
 
-  private disk: Disk = { at: null, free: null, total: null, uses: [], why: '' }
-
   private outside: Outside[] = []
   private heavyAt = 0
   /** The session of each flagged pid, read once: a pid's environment does not change. */
   private sessions = new Map<number, string | null>()
-  private diskRunning: Promise<void> | null = null
 
   constructor(deps: Deps = DEPS) {
     this.deps = deps
@@ -336,7 +258,6 @@ export class Sampler {
     this.lastSample = now
     if (now - this.logsAt >= LOGS_MS || !this.logsAt) this.readLogs(where.logs, now)
     if (now - this.heavyAt >= HEAVY_MS || !this.heavyAt) await this.lookForHeavy(now)
-    if (!this.diskRunning && (this.disk.at === null ? true : now - this.disk.at >= DISK_MS)) this.diskRunning = this.measureDisk().finally(() => (this.diskRunning = null))
   }
 
   private hostPorts: number[] = []
@@ -397,80 +318,6 @@ export class Sampler {
     }
   }
 
-  private worktreeSizes = new Map<string, { bytes: number; at: number }>()
-
-  /** One folder's size with `du` at the lowest priority, or null when it took too long or could not be read. */
-  private async du(path: string, timeoutMs: number): Promise<number | null> {
-    try {
-      return parseDu(await this.deps.run('nice', ['-n', '19', 'du', '-sk', path], timeoutMs)).get(path) ?? null
-    } catch {
-      return null
-    }
-  }
-
-  private async measureDisk(): Promise<void> {
-    const { deps } = this
-    const where = places(deps)
-    const uses: DiskUse[] = []
-    const why: string[] = []
-    let free: number | null = null
-    let total: number | null = null
-    try {
-      const df = parseDf(await deps.run('df', ['-k', deps.home], 10_000))
-      if (df) ({ free, total } = df)
-    } catch {
-      why.push('the free space of the disk')
-    }
-    const frame = sizeOf(where.frame) + sizeOf(`${where.frame}-wal`) + sizeOf(`${where.frame}-shm`)
-    if (frame) uses.push({ label: 'Kehikot’s database', kind: 'kehikot', bytes: frame })
-    for (const one of [
-      { path: where.installed, label: 'Installed modules', kind: 'kehikot' as const },
-      { path: where.versions, label: 'Kept versions', kind: 'kehikot' as const },
-      { path: where.logs, label: 'Logs', kind: 'logs' as const },
-    ]) {
-      if (!existsSync(one.path)) continue
-      const bytes = await this.du(one.path, 60_000)
-      if (bytes === null) why.push(`the size of ${one.label.toLowerCase()}`)
-      else uses.push({ label: one.label, kind: one.kind, bytes })
-    }
-    const counted: DiskUse[] = []
-    const publish = () => {
-      this.disk = {
-        at: deps.now(),
-        free,
-        total,
-        uses: [...uses, ...counted].sort((a, b) => b.bytes - a.bytes),
-        why: why.length ? `Monitor could not measure ${why.slice(0, 3).join(', ')}${why.length > 3 ? ` and ${why.length - 3} more` : ''} in time.` : '',
-      }
-    }
-    /* Kehikot's own folders are said at once; the worktrees follow as each is measured. */
-    publish()
-    /*
-     * Agent worktrees are counted every time (a folder listing), and measured only every
-     * `WORKTREES_MS`: a hundred worktrees with node_modules take minutes of disk reading to sum.
-     */
-    const now = deps.now()
-    for (const root of worktreeRoots(deps.home)) {
-      let names: string[] = []
-      try {
-        names = readdirSync(root).filter((name) => !name.startsWith('.'))
-      } catch {
-        continue
-      }
-      if (!names.length) continue
-      const withModules = names.filter((name) => existsSync(join(root, name, 'node_modules'))).length
-      let held = this.worktreeSizes.get(root)
-      if (!held || now - held.at >= WORKTREES_MS) {
-        const bytes = await this.du(root, 5 * 60_000)
-        if (bytes !== null) this.worktreeSizes.set(root, (held = { bytes, at: now }))
-        else why.push(`the size of ${tilde(root, deps.home)}`)
-      }
-      counted.push({ label: tilde(root, deps.home), kind: 'worktrees', bytes: held?.bytes ?? 0, count: names.length, withModules })
-      publish()
-    }
-    publish()
-  }
-
   /** What is held, as one snapshot. */
   private said(): Snapshot {
     const now = this.deps.now()
@@ -487,12 +334,7 @@ export class Sampler {
         crashedAt: day(this.logs.get(id)?.crashes),
       }
     })
-    return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, disk: this.disk, self: this.selfPoint, why: this.why, outside: this.outside }
-  }
-
-  /** Wait for a disk measurement under way: for the tests. */
-  async settled(): Promise<void> {
-    await this.diskRunning
+    return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, self: this.selfPoint, why: this.why, outside: this.outside }
   }
 }
 
