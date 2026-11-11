@@ -2,7 +2,6 @@ import { useRef } from 'react'
 import { Area, AreaChart, CartesianGrid, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
-import { outsideSaid } from '@/health/heavy'
 import {
   average,
   cpuSaid,
@@ -61,7 +60,6 @@ export function HealthView({ snapshot, judged, problem, now, box: given }: { sna
 
 function Shown({ snapshot, judged, problem, now, detail, width }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null }) {
   const crashed = crashesSaid(snapshot, now)
-  const outside = outsideSaid(snapshot.outside ?? [])
   return (
     <>
       {problem || snapshot.why ? (
@@ -76,12 +74,7 @@ function Shown({ snapshot, judged, problem, now, detail, width }: { snapshot: Sn
           {crashed}.
         </p>
       ) : null}
-      {/* Heavy work an agent session started outside the Queue: one line, in words (a kind, a session), never a command line. */}
-      {outside ? (
-        <p className="text-amber-700 dark:text-amber-400 text-xs" role="status" data-testid="outside">
-          {outside}.
-        </p>
-      ) : null}
+      {/* Heavy work an agent session started on its own is in the Inbox and the footer, not here: it takes no height (0.15.0). */}
             {detail === 'full' ? <Modules snapshot={snapshot} judged={judged} /> : null}
       {detail === 'full' && snapshot.self ? (
         <p className="text-muted-foreground text-xs" data-testid="self">

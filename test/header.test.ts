@@ -20,9 +20,9 @@ describe('the header', () => {
     ])
   })
 
-  test('Health shows only the view and the pause: the timeline has nothing to set up there', () => {
+  test('Health shows only the view, the pause and Tell agents: the timeline has nothing to set up there', () => {
     const items = headerItems({ ...state, view: 'health' })
-    expect(items.map((item) => item.id)).toEqual(['view', 'pause'])
+    expect(items.map((item) => item.id)).toEqual(['view', 'pause', 'tell'])
     expect(items[0]).toMatchObject({ value: 'health' })
   })
 

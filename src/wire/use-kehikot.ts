@@ -16,7 +16,7 @@ export type Host = Pick<ProtocolHost, 'where' | 'projectPath' | 'theme' | 'heade
   Partial<Pick<ProtocolHost, 'kept' | 'remember' | 'footer' | 'drawsFooter' | 'ready'>>
 
 /** The host as the page holds it: a screen's `Host`, and what `useKept` reads and writes. */
-export type Live = Host & Pick<ProtocolHost, 'kept' | 'remember' | 'read'> & Partial<Pick<ProtocolHost, 'visible'>>
+export type Live = Host & Pick<ProtocolHost, 'kept' | 'remember' | 'read'> & Partial<Pick<ProtocolHost, 'visible' | 'activity'>>
 
 export function useKehikot(events: HostEvents = {}): Live {
   const host = useHost(ID, events, { keepView: { except: ['paused'] } })

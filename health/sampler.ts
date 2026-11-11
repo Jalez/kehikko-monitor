@@ -3,9 +3,12 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { cpus, homedir, totalmem } from 'node:os'
 import { join } from 'node:path'
 
-import { TRAFFIC_HOST_BY } from 'kehikot-module-protocol'
+import { TRAFFIC_HOST_BY, WORK_QUEUE, providerOf, type WorkQueue } from 'kehikot-module-protocol'
+import { askHost } from 'kehikot-module-protocol/serve'
 
+import { ID } from '../manifest.ts'
 import { heavyOutside, parseProcLines, sessionFrom, type Outside } from '../src/health/heavy.ts'
+import { Told } from '../src/health/tell.ts'
 import { crashesIn, parseListeners, parsePs, treeOf, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
 
 /**
@@ -26,9 +29,13 @@ import { crashesIn, parseListeners, parsePs, treeOf, type ModuleHealth, type Poi
  * - The registry's file names and each one's `url` (the port), every `REGISTRY_MS`.
  * - Each module's log under the logs folder, every `LOGS_MS` and only when its size or time
  *   changed: the host's start markers and crash lines (`crashesIn`). Nothing else of it is kept.
- * - `ps -A -o pid=,ppid=,pcpu=,args=` every `HEAVY_MS`: heavy work an agent session started outside
- *   the Queue. Each command line is only classified into one word (`heavyWord`) and dropped; for a
- *   process so flagged, its `ps -E` once, for the agent CLI's session variable alone.
+ * - `ps -A -o pid=,ppid=,pcpu=,args=` every `HEAVY_MS`: heavy work an agent session started on its
+ *   own, outside the provider of heavy work in turn here if there is one (`services.find`, every `PROVIDER_MS`: its
+ *   descriptor's `marks` say which runs are in turn). Each command line is classified into one word
+ *   (`heavyWord`) and dropped; for a process so flagged, its `ps -E` once, for the agent CLI's session
+ *   variable alone.
+ * - With a provider of heavy work in turn here and the person's "Tell agents" on, the session that started it is told once
+ *   (`messages.notifySession`, `src/health/tell.ts`), with its own command line, shortened, in the body.
  *
  * Nothing on the disk is measured: what worktrees and folders take is the Worktrees module's, since Monitor 0.14.0.
  *
@@ -41,8 +48,10 @@ export const RING = 60
 export const LISTEN_MS = 15_000
 export const REGISTRY_MS = 30_000
 export const LOGS_MS = 60_000
-/** How often heavy work outside the Queue is looked for (`src/health/heavy.ts`). */
+/** How often heavy work agent sessions started on their own is looked for (`src/health/heavy.ts`). */
 export const HEAVY_MS = 15_000
+/** How often the host is asked who provides the provider of heavy work in turn here. */
+export const PROVIDER_MS = 60_000
 const DAY_MS = 24 * 60 * 60_000
 
 export interface Deps {
@@ -53,7 +62,13 @@ export interface Deps {
   cores: number
   memory: number
   pid: number
+  /** A question to the host from this server (`askHost`): who provides a service, and a notice to one session. */
+  ask?: (method: 'services.find' | 'messages.notifySession', params: Record<string, unknown>) => Promise<{ ok: boolean; data?: unknown }>
 }
+
+/* Deps without `ask` (a test's) never reach a host. */
+const asksNothing: NonNullable<Deps['ask']> = async () => ({ ok: false })
+const askTheHost: NonNullable<Deps['ask']> = (method, params) => askHost(method, params as never, { module: ID }) as Promise<{ ok: boolean; data?: unknown }>
 
 const run: Deps['run'] = (file, args, timeoutMs) =>
   new Promise((resolve, reject) =>
@@ -71,6 +86,7 @@ export const DEPS: Deps = {
   cores: cpus().length || 1,
   memory: totalmem(),
   pid: process.pid,
+  ask: askTheHost,
 }
 
 /** Kehikot's machine folder, its registry and its logs, as the host spells them (`KEHIKOT_*`, else the defaults). */
@@ -147,13 +163,20 @@ export class Sampler {
   private heavyAt = 0
   /** The session of each flagged pid, read once: a pid's environment does not change. */
   private sessions = new Map<number, string | null>()
+  /** The provider of heavy work in turn here, as its provider describes it; null when none is (or the host is too old to say). */
+  private provider: WorkQueue | null = null
+  private providerAt = 0
+  /** The person's "Tell agents", as the page last said it; on until it says otherwise. */
+  private tell = true
+  private readonly told = new Told()
 
   constructor(deps: Deps = DEPS) {
     this.deps = deps
   }
 
-  /** Somebody looked: keep sampling for a while, take a sample if the last is stale, and say what is held. */
-  async snapshot(): Promise<Snapshot> {
+  /** Somebody looked: keep sampling for a while, take a sample if the last is stale, and say what is held. `tell`: the page's "Tell agents", when it says. */
+  async snapshot(tell?: boolean): Promise<Snapshot> {
+    if (tell !== undefined) this.tell = tell
     const now = this.deps.now()
     this.watchedUntil = now + WATCH_MS
     if (now - this.lastSample >= EVERY_MS - 500) await this.sample()
@@ -262,12 +285,15 @@ export class Sampler {
 
   private hostPorts: number[] = []
 
-  /** Heavy work an agent session started outside the Queue, with its session once per process. */
+  /** Heavy work an agent session started on its own, with its session once per process; told to it when that is due. */
   private async lookForHeavy(now: number): Promise<void> {
     this.heavyAt = now
+    await this.findProvider(now)
     let found: Outside[]
+    let lines: ReturnType<typeof parseProcLines>
     try {
-      found = heavyOutside(parseProcLines(await this.deps.run('ps', ['-A', '-o', 'pid=,ppid=,pcpu=,args='], 5_000)), this.deps.pid)
+      lines = parseProcLines(await this.deps.run('ps', ['-A', '-o', 'pid=,ppid=,pcpu=,args='], 5_000))
+      found = heavyOutside(lines, this.deps.pid, this.provider?.marks ?? [])
     } catch {
       this.outside = []
       return
@@ -287,6 +313,27 @@ export class Sampler {
       one.session = this.sessions.get(one.pid) ?? null
     }
     this.outside = found
+    this.told.forget(live, now)
+    if (!this.tell || !this.provider) return
+    /* The command lines of the flagged processes only, for their own sessions' notices; dropped after. */
+    const commands = new Map(lines.filter((line) => live.has(line.pid)).map((line) => [line.pid, line.args]))
+    for (const due of this.told.due(found, this.provider, commands, now)) {
+      this.told.mark(due, now)
+      await (this.deps.ask ?? asksNothing)('messages.notifySession', { session: due.session, body: due.body, kind: 'report' }).catch(() => null)
+    }
+  }
+
+  /** Who provides the provider of heavy work in turn here, asked of the host every `PROVIDER_MS`. None when the host does not say. */
+  private async findProvider(now: number): Promise<void> {
+    if (this.providerAt && now - this.providerAt < PROVIDER_MS) return
+    this.providerAt = now
+    try {
+      const found = await (this.deps.ask ?? asksNothing)('services.find', { service: WORK_QUEUE })
+      const providers = found.ok ? (found.data as { providers?: unknown } | undefined)?.providers : null
+      this.provider = Array.isArray(providers) ? (providerOf(WORK_QUEUE, providers)?.descriptor ?? null) : null
+    } catch {
+      this.provider = null
+    }
   }
 
   /** Who answers on a module's port; for Kehikot, on any of its ports. */
@@ -334,7 +381,7 @@ export class Sampler {
         crashedAt: day(this.logs.get(id)?.crashes),
       }
     })
-    return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, self: this.selfPoint, why: this.why, outside: this.outside }
+    return { at: this.lastSample, cores: this.deps.cores, memory: this.deps.memory, every: EVERY_MS / 1000, modules, self: this.selfPoint, why: this.why, outside: this.outside, provider: this.provider?.name ?? null }
   }
 }
 

@@ -65,12 +65,12 @@ export function treeOf(root: number, procs: readonly Proc[], others: ReadonlySet
   const children = new Map<number, number[]>()
   for (const proc of procs) children.set(proc.ppid, [...(children.get(proc.ppid) ?? []), proc.pid])
   const out: number[] = []
-  const queue = [root]
-  while (queue.length && out.length < 200) {
-    const pid = queue.shift() as number
+  const pending = [root]
+  while (pending.length && out.length < 200) {
+    const pid = pending.shift() as number
     if (out.includes(pid) || (pid !== root && others.has(pid))) continue
     out.push(pid)
-    queue.push(...(children.get(pid) ?? []))
+    pending.push(...(children.get(pid) ?? []))
   }
   return out
 }
@@ -184,8 +184,10 @@ export interface Snapshot {
   self: Point | null
   /** A sentence when something could not be looked at (no `ps`, no registry). */
   why: string
-  /** Heavy work agent sessions started outside the Queue; absent from an older server. */
+  /** Heavy work agent sessions started on their own; absent from an older server. */
   outside?: Outside[]
+  /** The name the provider of heavy work in turn goes by (its descriptor's `name`), or null when none is; absent from an older server. */
+  provider?: string | null
 }
 
 export const emptySnapshot = (): Snapshot => ({ at: 0, cores: 1, memory: 0, every: 5, modules: [], self: null, why: '' })
@@ -351,7 +353,7 @@ export function healthSaid(snapshot: Snapshot, now: number, view: HealthView = '
     lines.push('', flagged.length ? 'Worth a look, the worst first:' : 'Nothing needs a look right now. The busiest:')
     lines.push(...(flagged.length ? flagged : all.filter((one) => byId.get(one.id)?.running).slice(0, 5)).map((one) => `- ${one.name}: ${one.said}${one.level === 'critical' ? ' (critical)' : one.level === 'warn' ? ' (warning)' : ''}`))
     const crashed = crashesSaid(snapshot, now)
-    const outside = outsideSaid(snapshot.outside ?? [])
+    const outside = outsideSaid(snapshot.outside ?? [], snapshot.provider ?? null)
     if (crashed || outside) lines.push('', ...(crashed ? [`${crashed}.`] : []), ...(outside ? [`${outside}.`] : []))
   }
   if (view === 'processes') {

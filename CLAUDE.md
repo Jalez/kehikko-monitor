@@ -17,9 +17,11 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | `src/view/` | The timeline (shadcn chart over Recharts: lines, bars or area), Repeats, the callers table, the virtual list of calls, open connections. |
 | `src/health/model.ts` | Pure and shared by the page, the sampler and the door: reading `ps`/`lsof`, a module's process tree, the host's start markers and crash lines in a module log (`crashesIn`), judging (`judge`, `LIMITS`), and every sentence of the Health view and the `health` tool. |
 | `health/sampler.ts` | The server's one `Sampler`: `ps` every 5 s, `lsof` every 15 s, the registry every 30 s, module logs every minute — only while the page or the tool asked in the last 30 s. A ring of 60 samples per module, in memory. Served at `GET /api/health`. |
-| `src/health/heavy.ts` | Pure: heavy work (a typecheck, tests, a build, an install) an agent session started outside the Queue — classified by program (`heavyWord`), attributed by walking up to the agent CLI, skipped under a Queue run; the one line said. Looked for every `HEAVY_MS` while watched. |
+| `src/health/heavy.ts` | Pure: heavy work (a typecheck, tests, a build, an install) an agent session started on its own — classified by program (`heavyWord`) and kind (`KIND_OF`, the protocol's `WORK_KINDS`), attributed by walking up to the agent CLI, skipped under a run of the provider of the protocol's `work.queue` service (its descriptor's `marks`); the one line said; the notice's body (`noticeBody`, `shortCommand`). Looked for every `HEAVY_MS` while watched. |
+| `src/health/tell.ts` | Pure: which notices are due (`Told`): only with a `work.queue` provider that takes that kind of work, only to a session attributed by its id, once per run, once per session and kind in `TELL_AGAIN_MS`. The sampler finds the provider (`services.find`, every `PROVIDER_MS`) and sends each (`messages.notifySession`). |
 | `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: two glance tiles (CPU, Memory), a crash line and the table as its own box grows (`detailOf`). |
 | `src/header.ts` | The header items: pure functions of state. |
+| `src/inbox.ts` | The Inbox items: one per run of heavy work an agent started on its own (`heavyItems`), reported from the page (`useHeavyInbox`). |
 | `src/footer.ts` | The footer items: the traffic's readouts and, after the first sample, the health's (the worst module, CPU as a meter of the cores, memory). |
 | `src/app.tsx` | The page. `Screen` renders from plain values, so tests need no host. |
 | `serve.ts`, `build.ts`, `run.sh` | Ready-built: `bun run build` stamps `dist/`, `run.sh` serves it when the stamp is HEAD, Vite otherwise. |
@@ -43,9 +45,11 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   sizes (`df`, `du`, `stat`), the registry's `url` for a port, and only the
   host's start and build markers and crash lines of a module log. Never another file's
   contents, never a command line said or kept: the one exception is `src/health/heavy.ts`,
-  which reads command lines only to classify heavy work into one word of `HEAVY`, and a
+  which reads command lines to classify heavy work into one word of `HEAVY`, and a
   flagged process's environment only for its agent session's variable (`SESSION_VARS`);
-  both are dropped at once. Sample only while somebody looks
+  both are dropped at once. A flagged process's own command line goes, shortened
+  (`shortCommand`), into the one notice to the session that started it, and nowhere else:
+  never drawn, never in a snapshot or a tool's answer. Sample only while somebody looks
   (`WATCH_MS`), and keep only the ring in memory.
 - **Health is CPU and memory.** The disk is not measured (0.14.0): what
   worktrees take, and cleaning them up, is the Worktrees module's; the `health`
@@ -66,10 +70,21 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   presses in one handler, own all the state, declare the whole list again on
   every change; one row at 380, 280 and 200 pixels (`LABEL_FIT`).
   `agents: true` on View, Range, Chart, Paused and Caller; never on Clear.
-  Health shows only View and Paused. The view is not kept.
+  Health shows only View, Paused and Tell agents. The view is not kept.
 - **The footer says what is going on now** (the header says how Monitor is set
   up): the traffic's readouts and the health's, one item each, never in both rows.
-- **Ask only for what is called.** `traffic:read` and `state:keep`, and nothing else.
+- **Heavy work is not drawn on the page.** Each run is an Inbox item while it lasts
+  (`src/inbox.ts`: `working`, `normal`, one per pid, reported whole when the runs change)
+  and one footer item; the Health view keeps no line for it.
+- **Ask only for what is called.** `traffic:read`, `state:keep`, `activity:report`, `services:read`,
+  `sessions:observe` and `agents:message`, and nothing else.
+- **Monitor names no other module.** Heavy work is said against the provider of the
+  protocol's `work.queue` service, found through the host (`services.find`), in its
+  descriptor's words: its name, its run lines, its tool, its marks. With none, the screen
+  says the work and nothing is told. `test/tell.test.ts` fails on a module's word in the code.
+- **Telling agents is the person's.** "Tell agents" in the Health header, on by default,
+  kept per container, never `agents: true`; the page carries it on each read
+  (`tell=0`). The host's mute of Monitor's messages holds too.
 - **Plain language.** Every sentence says what happened and what to do, in the
   person's words.
 
