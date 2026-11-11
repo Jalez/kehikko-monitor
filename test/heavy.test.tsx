@@ -87,7 +87,7 @@ describe('outside the work queue, and whose', () => {
   test('said in one line: the kind, the session, the CPU — never a command line', () => {
     const one: Outside = { pid: 3, word: 'tsc', kind: 'typecheck', pcpu: 170, sessionPid: 100, agent: 'claude', session: '9186314e-8c95' }
     expect(outsideSaid([one], 'Turns')).toBe('Heavy work running outside Turns: tsc from claude session 9186314e (170% CPU)')
-    expect(outsideSaid([one])).toBe('Heavy work agent sessions started: tsc from claude session 9186314e (170% CPU)')
+    expect(outsideSaid([one])).toBe('Heavy work running outside a work queue: tsc from claude session 9186314e (170% CPU)')
     expect(outsideSaid([{ ...one, session: null }])).toContain('tsc from claude session (pid 100)')
     expect(outsideSaid([])).toBe('')
   })
@@ -95,12 +95,13 @@ describe('outside the work queue, and whose', () => {
 
 describe('where it is said', () => {
   const outside: Outside[] = [{ pid: 3, word: 'vitest', kind: 'test', pcpu: 240, sessionPid: 100, agent: 'claude', session: 'abcdef1234' }]
-  test('the health tool, the footer and the Health view', () => {
+  test('the health tool and the footer; the Health view keeps no strip for it', () => {
     const snapshot = { ...snapshotOf(NOW), outside, provider: 'Turns' }
     expect(healthSaid(snapshot, NOW)).toContain('Heavy work running outside Turns: vitest from claude session abcdef12 (240% CPU).')
-    expect(healthItems({ snapshot, judged: judged(snapshot, NOW) })).toContainEqual(expect.objectContaining({ id: 'outside', text: 'vitest outside Turns', level: 'warn' }))
+    expect(healthItems({ snapshot, judged: judged(snapshot, NOW) })).toContainEqual(expect.objectContaining({ id: 'outside', text: '1 heavy run outside Turns', level: 'warn' }))
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} />)
-    expect(screen.getByTestId('outside').textContent).toBe('Heavy work running outside Turns: vitest from claude session abcdef12 (240% CPU).')
+    expect(screen.queryByTestId('outside')).toBeNull()
+    expect(document.body.textContent).not.toContain('Heavy work')
   })
   test('nothing outside, nothing said', () => {
     const snapshot = snapshotOf(NOW)

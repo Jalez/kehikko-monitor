@@ -175,11 +175,14 @@ export function sessionFrom(text: string): string | null {
 /** Who started it, in a few words: "claude session 9186314e", or "claude session (pid 43715)". */
 export const sessionSaid = (one: Pick<Outside, 'agent' | 'session' | 'sessionPid'>): string => (one.session ? `${one.agent} session ${one.session.slice(0, 8)}` : `${one.agent} session (pid ${one.sessionPid})`)
 
+/** What heavy work is outside: the provider of heavy work in turn by its own name, or "a work queue" when none is here. */
+export const outsideWhat = (provider: string | null): string => provider ?? 'a work queue'
+
 /** The one line said for heavy work agent sessions started on their own; '' when there is none. `provider` is the provider of heavy work in turn's own name, when one is here. */
 export function outsideSaid(list: readonly Outside[], provider: string | null = null): string {
   if (!list.length) return ''
   const each = list.slice(0, 4).map((one) => `${one.word} from ${sessionSaid(one)} (${one.pcpu}% CPU)`)
-  return `${provider ? `Heavy work running outside ${provider}` : 'Heavy work agent sessions started'}: ${each.join('; ')}${list.length > 4 ? `; and ${list.length - 4} more` : ''}`
+  return `Heavy work running outside ${outsideWhat(provider)}: ${each.join('; ')}${list.length > 4 ? `; and ${list.length - 4} more` : ''}`
 }
 
 /** How long a command line may be in a notice. */

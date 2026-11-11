@@ -1,6 +1,6 @@
 import { LIMITS, footerItemsSchema, type FooterItem } from 'kehikot-module-protocol'
 
-import { outsideSaid } from './health/heavy.ts'
+import { outsideSaid, outsideWhat } from './health/heavy.ts'
 import { percent, sizeSaid, totals, type Judged, type Snapshot } from './health/model.ts'
 import type { BudgetLine } from './traffic/budgets.ts'
 import type { CallerSummary } from './traffic/model.ts'
@@ -74,11 +74,11 @@ export function healthItems(health: FooterState['health']): unknown[] {
   })
   const outside = snapshot.outside ?? []
   if (outside.length) {
-    const first = outside[0]!
+    /* Live state, one item in the existing row; each run is also an Inbox item (`src/inbox.ts`). */
     items.push({
       kind: 'text',
       id: 'outside',
-      text: cut(`${first.word} ${snapshot.provider ? `outside ${snapshot.provider}` : 'by an agent'}${outside.length > 1 ? ` +${outside.length - 1}` : ''}`, LIMITS.FOOTER_TEXT),
+      text: cut(`${outside.length} heavy run${outside.length === 1 ? '' : 's'} outside ${outsideWhat(snapshot.provider ?? null)}`, LIMITS.FOOTER_TEXT),
       level: 'warn',
       align: 'center',
       tooltip: cut(`${outsideSaid(outside, snapshot.provider ?? null)}.`, LIMITS.FOOTER_TOOLTIP),

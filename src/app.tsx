@@ -12,6 +12,7 @@ import { RANGES, STYLES, callerOf, colourOrder, repeats, summary, type Caller, t
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
 import { useHealth, type Health } from '@/wire/use-health'
+import { useHeavyInbox } from '@/inbox'
 import { useOnScreen } from '@/wire/use-on-screen'
 
 import { HealthView } from '@/view/health'
@@ -71,6 +72,8 @@ export function App() {
   const traffic = useTraffic(host.where === 'hosted' ? host.request : null, resting, clearedAt)
   /* Read whatever the view: the footer says the health in both. */
   const health = useHealth(host.where === 'hosted', resting, undefined, undefined, tell)
+  /* Each run of heavy work an agent started on its own is an Inbox item while it runs (`src/inbox.ts`). */
+  useHeavyInbox(host.where === 'hosted' ? host.activity : undefined, health.snapshot.outside, health.snapshot.provider)
 
   /* A colour follows its caller from the moment it first called, whatever the filter or the ranks. */
   useEffect(() => {

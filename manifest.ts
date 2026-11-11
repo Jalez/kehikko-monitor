@@ -63,13 +63,15 @@ export const DECLARED: Manifest = manifestSchema.parse({
      *   from this module's server for the `traffic` tool.
      * - state:keep — `state.set`, how the timeline is drawn (lines, bars or area), so it is the same
      *   the next time Monitor is opened, and the header's other choices for this container.
+     * - activity:report — `activity.set`, from the page: each run of heavy work an agent session
+     *   started on its own is an Inbox item while it runs (`src/inbox.ts`), never "needs you".
      * - services:read — `services.find` (protocol 2.81.0), from the server: whether a module here runs
      *   heavy work in turn, and its descriptor, which is all Monitor says about it.
      * - sessions:observe and agents:message — `messages.notifySession` (2.81.0), from the server: one
      *   notice to the agent session that started heavy work on its own, saying how to hand it to that
      *   module. agents:message also gives the person the "Messages to agents" mute for Monitor.
      */
-    uses: ['traffic:read', 'state:keep', 'services:read', 'sessions:observe', 'agents:message'],
+    uses: ['traffic:read', 'state:keep', 'activity:report', 'services:read', 'sessions:observe', 'agents:message'],
     /* Framed on its own origin, like every module that serves its own doors; it keeps nothing in a project. */
     storage: true,
     prompt: false,

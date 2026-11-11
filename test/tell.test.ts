@@ -241,8 +241,8 @@ describe('Monitor names no provider', () => {
     for (const dir of ['src', 'health']) walk(join(root, dir))
     files.push(...['doors.ts', 'manifest.ts', 'skills.ts', 'serve.ts'].map((name) => join(root, name)))
     for (const file of files) {
-      /* `WORK_QUEUE` and `workQueue…` are the protocol's own names for the service. */
-      const text = readFileSync(file, 'utf8').replace(/\bWORK_QUEUE\b|\bworkQueue\w*|\bWorkQueue\b/g, '')
+      /* `WORK_QUEUE` and `workQueue…` are the protocol's own names for the service; "a work queue" is said when none is here. */
+      const text = readFileSync(file, 'utf8').replace(/\bWORK_QUEUE\b|\bworkQueue\w*|\bWorkQueue\b|\ba work queue\b/g, '')
       expect({ file, queue: /queue/i.test(text) }).toEqual({ file, queue: false })
     }
     expect(WORK_QUEUE).toBe('work.queue')
