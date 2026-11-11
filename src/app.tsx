@@ -42,6 +42,8 @@ export function App() {
   const [range, setRange] = useKept<Range>(host, 'range', 5, among(RANGES))
   const [style, setStyle] = useKept<Style>(host, 'style', 'lines', among(STYLES))
   const [caller, setCaller] = useKept<Caller | null>(host, 'caller', null, isCaller)
+  /* "Tell agents about heavy work they start on their own": on by default, kept for this container. */
+  const [tell, setTell] = useKept<boolean>(host, 'tell', true, (value) => typeof value === 'boolean')
   const [paused, setPaused] = useState(false)
   const [clearedAt, setClearedAt] = useState(0)
   const [filter, setFilter] = useState<Filter>(() => ({ by: caller, text: '' }))
@@ -56,18 +58,19 @@ export function App() {
     else if ('range' in said) setRange(said.range)
     else if ('style' in said) setStyle(said.style)
     else if ('paused' in said) setPaused(said.paused)
+    else if ('tell' in said) setTell(said.tell)
     else if ('caller' in said) {
       setCaller(said.caller)
       setFilter((was) => ({ ...was, by: said.caller }))
     } else setClearedAt(Date.now())
-  }, [setView, setRange, setStyle, setCaller])
+  }, [setView, setRange, setStyle, setCaller, setTell])
   pressing.current = press
   /* Off screen (kept hidden on another kehikko, or the window hidden): nothing is read (`useOnScreen`). */
   const shown = useOnScreen(host.visible)
   const resting = paused || !shown
   const traffic = useTraffic(host.where === 'hosted' ? host.request : null, resting, clearedAt)
   /* Read whatever the view: the footer says the health in both. */
-  const health = useHealth(host.where === 'hosted', resting)
+  const health = useHealth(host.where === 'hosted', resting, undefined, undefined, tell)
 
   /* A colour follows its caller from the moment it first called, whatever the filter or the ranks. */
   useEffect(() => {
@@ -87,8 +90,8 @@ export function App() {
   callers.current = seen
 
   const footed = host.where === 'hosted' && host.drawsFooter === true
-  const state: HeaderState = { view, range, style, paused, caller, callers: seen, footed }
-  const items = useMemo(() => headerItems(state), [view, range, style, paused, caller, seen, footed]) // eslint-disable-line react-hooks/exhaustive-deps
+  const state: HeaderState = { view, range, style, paused, caller, callers: seen, footed, tell }
+  const items = useMemo(() => headerItems(state), [view, range, style, paused, caller, seen, footed, tell]) // eslint-disable-line react-hooks/exhaustive-deps
   const { header } = host
   useEffect(() => header(items), [header, items])
 

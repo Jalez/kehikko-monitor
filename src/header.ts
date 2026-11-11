@@ -4,7 +4,8 @@ import { RANGES, STYLES, STYLE_SAID, callerName, type Caller, type Range, type S
 
 /**
  * What Monitor puts in its container's header: the view (Traffic or Health), the range of the timeline, how it is drawn (Chart:
- * lines, bars or area), pause, which caller to show, and Clear. The host draws them; this page owns the state and declares the whole list again
+ * lines, bars or area), pause, which caller to show, and Clear; in Health, pause and "Tell agents" (whether a session that starts
+ * heavy work on its own is told how to hand it to the module here that runs such work in turn). The host draws them; this page owns the state and declares the whole list again
  * whenever it changes.
  *
  * `agents: true` only on what loses nothing: the range, the chart, the pause and the caller. Clear puts away
@@ -40,6 +41,11 @@ export interface HeaderState {
   callers: readonly Caller[]
   /** The host draws the footer, which has Clear beside the readouts it clears (`footer.ts`). */
   footed?: boolean
+  /**
+   * Whether Monitor tells an agent session that started heavy work on its own how to hand it to the
+   * module here that runs such work in turn (`src/health/tell.ts`). On unless the person turned it off; kept with the host.
+   */
+  tell?: boolean
 }
 
 /** A header option id for a caller: its id, or what Kehikot named it (`unnamed` for a caller an older Kehikot could not). */
@@ -63,7 +69,14 @@ export function headerItems(state: HeaderState): HeaderItem[] {
     value: state.view ?? 'traffic',
   }
   /* Health has nothing of the timeline to set up: only what it shows, and the pause. */
-  if (state.view === 'health') return headerItemsSchema.parse([view, { kind: 'toggle', id: 'pause', label: 'Paused', agents: true, checked: state.paused }])
+  if (state.view === 'health') {
+    return headerItemsSchema.parse([
+      view,
+      { kind: 'toggle', id: 'pause', label: 'Paused', agents: true, checked: state.paused },
+      /* The person's: an agent does not turn off what is told to agents. */
+      { kind: 'toggle', id: 'tell', label: 'Tell agents', checked: state.tell !== false },
+    ])
+  }
   return headerItemsSchema.parse([
     view,
     {
@@ -106,7 +119,7 @@ export function keptStyle(kept: unknown): Style {
   return (STYLES as readonly unknown[]).includes(style) ? (style as Style) : 'lines'
 }
 
-export type Pressed = { view: View } | { range: Range } | { style: Style } | { paused: boolean } | { caller: Caller | null } | { clear: true }
+export type Pressed = { view: View } | { range: Range } | { style: Style } | { paused: boolean } | { tell: boolean } | { caller: Caller | null } | { clear: true }
 
 /** What a press asks for, or a sentence saying why it was not taken. */
 export function pressed(item: string, value: unknown, callers: readonly Caller[]): Pressed | string {
@@ -117,6 +130,7 @@ export function pressed(item: string, value: unknown, callers: readonly Caller[]
   }
   if (item === 'style') return (STYLES as readonly unknown[]).includes(value) ? { style: value as Style } : `"${String(value).slice(0, 40)}" is not a way Monitor draws its chart: lines, bars or area.`
   if (item === 'pause') return typeof value === 'boolean' ? { paused: value } : 'Pause is on or off.'
+  if (item === 'tell') return typeof value === 'boolean' ? { tell: value } : 'Tell agents is on or off.'
   if (item === 'caller') {
     if (value === EVERY) return { caller: null }
     const caller = callers.find((one) => callerOption(one) === value)

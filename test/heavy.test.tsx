@@ -4,7 +4,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { heavyOutside, heavyWord, outsideSaid, parseProcLines, QUEUE_RUN, sessionFrom, type Outside } from '../src/health/heavy.ts'
+import { heavyOutside, heavyWord, outsideSaid, parseProcLines, sessionFrom, type Outside } from '../src/health/heavy.ts'
+
+/* What a work-queue provider's descriptor says its runs are known by: here, made up. */
+const WRAP = '"$@"; c=$?; printf %s "$c" > "$0"; exit $c'
+const MARKS = [WRAP, 'turns-cli']
 import { healthSaid, judged } from '../src/health/model.ts'
 import { healthItems } from '../src/footer.ts'
 import { HealthView } from '../src/view/health.tsx'
@@ -37,7 +41,7 @@ describe('what is heavy work, by its program', () => {
   })
 })
 
-describe('outside the Queue, and whose', () => {
+describe('outside the work queue, and whose', () => {
   const ps = (lines: Array<[number, number, number, string]>) => lines.map(([pid, ppid, cpu, args]) => `${pid} ${ppid} ${cpu} ${args}`).join('\n')
   test('a tsc under an agent CLI\'s shell is flagged, with its children\'s CPU, under that session', () => {
     const procs = parseProcLines(ps([
@@ -46,17 +50,18 @@ describe('outside the Queue, and whose', () => {
       [300, 200, 150, 'node /w/node_modules/typescript/bin/tsc --noEmit'],
       [301, 300, 20, 'node /w/node_modules/typescript/lib/worker.js'],
     ]))
-    expect(heavyOutside(procs)).toEqual([{ pid: 300, word: 'tsc', pcpu: 170, sessionPid: 100, agent: 'claude', session: null }])
+    expect(heavyOutside(procs)).toEqual([{ pid: 300, word: 'tsc', kind: 'typecheck', pcpu: 170, sessionPid: 100, agent: 'claude', session: null }])
   })
-  test('the same under a Queue run, or under the Queue\'s CLI, is not', () => {
+  test('the same under a run of the provider, or under its CLI, by its marks, is not; with no provider, it is', () => {
     const procs = parseProcLines(ps([
       [100, 1, 2, '/Users/x/.local/bin/claude --resume abc'],
-      [150, 1, 0, `/bin/sh -c ${QUEUE_RUN} /q/exit/r1 bun test`],
+      [150, 100, 0, `/bin/sh -c ${WRAP} /q/exit/r1 bun test`],
       [160, 150, 90, 'bun test'],
-      [200, 100, 0, 'bun /q/bin/kehikot-queue.ts run -- tsc'],
+      [200, 100, 0, 'bun /q/bin/turns-cli.ts run -- tsc'],
       [210, 200, 90, 'tsc'],
     ]))
-    expect(heavyOutside(procs)).toEqual([])
+    expect(heavyOutside(procs, 0, MARKS)).toEqual([])
+    expect(heavyOutside(procs).map((one) => one.pid).sort()).toEqual([160, 210])
   })
   test('a person\'s own terminal is theirs: not flagged; Monitor itself never is', () => {
     const procs = parseProcLines(ps([
@@ -80,25 +85,26 @@ describe('outside the Queue, and whose', () => {
     expect(sessionFrom('bun test PATH=/bin')).toBeNull()
   })
   test('said in one line: the kind, the session, the CPU — never a command line', () => {
-    const one: Outside = { pid: 3, word: 'tsc', pcpu: 170, sessionPid: 100, agent: 'claude', session: '9186314e-8c95' }
-    expect(outsideSaid([one])).toBe('Heavy work running outside the Queue: tsc from claude session 9186314e (170% CPU)')
+    const one: Outside = { pid: 3, word: 'tsc', kind: 'typecheck', pcpu: 170, sessionPid: 100, agent: 'claude', session: '9186314e-8c95' }
+    expect(outsideSaid([one], 'Turns')).toBe('Heavy work running outside Turns: tsc from claude session 9186314e (170% CPU)')
+    expect(outsideSaid([one])).toBe('Heavy work agent sessions started: tsc from claude session 9186314e (170% CPU)')
     expect(outsideSaid([{ ...one, session: null }])).toContain('tsc from claude session (pid 100)')
     expect(outsideSaid([])).toBe('')
   })
 })
 
 describe('where it is said', () => {
-  const outside: Outside[] = [{ pid: 3, word: 'vitest', pcpu: 240, sessionPid: 100, agent: 'claude', session: 'abcdef1234' }]
+  const outside: Outside[] = [{ pid: 3, word: 'vitest', kind: 'test', pcpu: 240, sessionPid: 100, agent: 'claude', session: 'abcdef1234' }]
   test('the health tool, the footer and the Health view', () => {
-    const snapshot = { ...snapshotOf(NOW), outside }
-    expect(healthSaid(snapshot, NOW)).toContain('Heavy work running outside the Queue: vitest from claude session abcdef12 (240% CPU).')
-    expect(healthItems({ snapshot, judged: judged(snapshot, NOW) })).toContainEqual(expect.objectContaining({ id: 'outside', text: 'vitest outside the Queue', level: 'warn' }))
+    const snapshot = { ...snapshotOf(NOW), outside, provider: 'Turns' }
+    expect(healthSaid(snapshot, NOW)).toContain('Heavy work running outside Turns: vitest from claude session abcdef12 (240% CPU).')
+    expect(healthItems({ snapshot, judged: judged(snapshot, NOW) })).toContainEqual(expect.objectContaining({ id: 'outside', text: 'vitest outside Turns', level: 'warn' }))
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} />)
-    expect(screen.getByTestId('outside').textContent).toBe('Heavy work running outside the Queue: vitest from claude session abcdef12 (240% CPU).')
+    expect(screen.getByTestId('outside').textContent).toBe('Heavy work running outside Turns: vitest from claude session abcdef12 (240% CPU).')
   })
   test('nothing outside, nothing said', () => {
     const snapshot = snapshotOf(NOW)
-    expect(healthSaid(snapshot, NOW)).not.toContain('outside the Queue')
+    expect(healthSaid(snapshot, NOW)).not.toContain('Heavy work')
     expect(healthItems({ snapshot, judged: judged(snapshot, NOW) }).some((one) => (one as { id: string }).id === 'outside')).toBe(false)
   })
 })
@@ -128,7 +134,7 @@ describe('the sampler looks, cheaply', () => {
     const sampler = new Sampler(deps)
     try {
       const first = await sampler.snapshot()
-      expect(first.outside).toEqual([{ pid: 300, word: 'tsc', pcpu: 120, sessionPid: 100, agent: 'claude', session: 'sess-1234-5678' }])
+      expect(first.outside).toEqual([{ pid: 300, word: 'tsc', kind: 'typecheck', pcpu: 120, sessionPid: 100, agent: 'claude', session: 'sess-1234-5678' }])
       clock += 5_000
       await sampler.snapshot()
       clock += HEAVY_MS

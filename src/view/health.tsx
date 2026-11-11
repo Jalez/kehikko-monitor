@@ -61,7 +61,7 @@ export function HealthView({ snapshot, judged, problem, now, box: given }: { sna
 
 function Shown({ snapshot, judged, problem, now, detail, width }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null }) {
   const crashed = crashesSaid(snapshot, now)
-  const outside = outsideSaid(snapshot.outside ?? [])
+  const outside = outsideSaid(snapshot.outside ?? [], snapshot.provider ?? null)
   return (
     <>
       {problem || snapshot.why ? (
@@ -76,7 +76,7 @@ function Shown({ snapshot, judged, problem, now, detail, width }: { snapshot: Sn
           {crashed}.
         </p>
       ) : null}
-      {/* Heavy work an agent session started outside the Queue: one line, in words (a kind, a session), never a command line. */}
+      {/* Heavy work an agent session started on its own: one line, in words (a kind, a session), never a command line. */}
       {outside ? (
         <p className="text-amber-700 dark:text-amber-400 text-xs" role="status" data-testid="outside">
           {outside}.

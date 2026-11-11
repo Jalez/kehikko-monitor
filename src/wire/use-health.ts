@@ -36,10 +36,19 @@ function defaultUrl(): string {
   }
 }
 
+/** The read's address with the person's "Tell agents" on it: `tell=0` when it is off. */
+export function tellUrl(url: string, tell: boolean): string {
+  return tell ? url : `${url}${url.includes('?') ? '&' : '?'}tell=0`
+}
+
 /** One function for every render, so the effect is not started again on each. */
 const browserFetch: Fetch = (url) => fetch(url)
 
-export function useHealth(on: boolean, paused: boolean, fetcher: Fetch = browserFetch, url: string = defaultUrl()): Health {
+/**
+ * `tell` says whether the person lets Monitor tell agent sessions about heavy work they started on their
+ * own (the header's "Tell agents"): carried on each read, so the server, which tells them, knows.
+ */
+export function useHealth(on: boolean, paused: boolean, fetcher: Fetch = browserFetch, url: string = defaultUrl(), tell = true): Health {
   const [health, setHealth] = useState<Health>({ snapshot: emptySnapshot(), problem: null })
   useEffect(() => {
     if (!on || paused) return
@@ -47,7 +56,7 @@ export function useHealth(on: boolean, paused: boolean, fetcher: Fetch = browser
     let timer: ReturnType<typeof setTimeout> | null = null
     const tick = async () => {
       try {
-        const snapshot = await readHealth(fetcher, url)
+        const snapshot = await readHealth(fetcher, tellUrl(url, tell))
         if (live) setHealth({ snapshot, problem: null })
       } catch (error) {
         if (live) setHealth((was) => ({ ...was, problem: error instanceof Error ? error.message : String(error) }))
@@ -59,6 +68,6 @@ export function useHealth(on: boolean, paused: boolean, fetcher: Fetch = browser
       live = false
       if (timer) clearTimeout(timer)
     }
-  }, [on, paused, fetcher, url])
+  }, [on, paused, fetcher, url, tell])
   return health
 }

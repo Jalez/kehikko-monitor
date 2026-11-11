@@ -43,7 +43,7 @@ export const ASK: { options: Pick<AskHostOptions, 'fetch' | 'env' | 'timeoutMs'>
 export const CLOCK = { now: () => Date.now() }
 
 /** Where the health of the processes comes from: the server's one sampler. The tests replace it. */
-export const HEALTH: { snapshot: () => Promise<Snapshot> } = { snapshot: () => SAMPLER.snapshot() }
+export const HEALTH: { snapshot: (tell?: boolean) => Promise<Snapshot> } = { snapshot: (tell) => SAMPLER.snapshot(tell) }
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const bad = (why: string, status = 400): Reply => ({ status, body: { ok: false, error: why } })
@@ -81,7 +81,7 @@ export function tools() {
       description:
         'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), and whether one crashed in the last hour. '
         + 'Use it to answer "why is the computer slow", "which module is heavy", "did something crash". '
-        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, heavy work (a typecheck, tests, a build, an install) an agent session started outside the Queue and which session. `processes`: every module by CPU and memory. Calls, restarts and the disk are not tracked here: the traffic tool has the calls, and the Worktrees module what worktrees take on the disk. '
+        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, heavy work (a typecheck, tests, a build, an install) an agent session started on its own (not in turn through a module here that runs such work) and which session. `processes`: every module by CPU and memory. Calls, restarts and the disk are not tracked here: the traffic tool has the calls, and the Worktrees module what worktrees take on the disk. '
         + 'Read-only: it stops and changes nothing, and reads only process figures, sizes, the start and crash lines of module logs, and what kind of heavy work a process is.',
       inputSchema: {
         type: 'object',
@@ -217,7 +217,7 @@ async function mcp(rpc: Rpc): Promise<Reply> {
 export async function answer(
   method: string,
   path: string,
-  _query: URLSearchParams,
+  query: URLSearchParams,
   body: Record<string, unknown> | null,
   _ticket: string | null,
 ): Promise<Reply | null> {
@@ -238,7 +238,8 @@ export async function answer(
   /* The processes' health, for the page: figures and sizes only. */
   if (path === '/api/health') {
     if (method !== 'GET') return bad('Health is read with GET.', 405)
-    return ok(await HEALTH.snapshot())
+    /* The page carries the person's "Tell agents": `tell=0` when it is off. */
+    return ok(await HEALTH.snapshot(query.get('tell') !== '0'))
   }
 
   /* An unknown path under /api/ is ours to refuse, not Vite's to serve as a file. */

@@ -78,10 +78,10 @@ export function healthItems(health: FooterState['health']): unknown[] {
     items.push({
       kind: 'text',
       id: 'outside',
-      text: cut(`${first.word} outside the Queue${outside.length > 1 ? ` +${outside.length - 1}` : ''}`, LIMITS.FOOTER_TEXT),
+      text: cut(`${first.word} ${snapshot.provider ? `outside ${snapshot.provider}` : 'by an agent'}${outside.length > 1 ? ` +${outside.length - 1}` : ''}`, LIMITS.FOOTER_TEXT),
       level: 'warn',
       align: 'center',
-      tooltip: cut(`${outsideSaid(outside)}.`, LIMITS.FOOTER_TOOLTIP),
+      tooltip: cut(`${outsideSaid(outside, snapshot.provider ?? null)}.`, LIMITS.FOOTER_TOOLTIP),
     })
   }
   return items
