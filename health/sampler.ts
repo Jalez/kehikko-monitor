@@ -8,6 +8,7 @@ import { askHost } from 'kehikot-module-protocol/serve'
 
 import { ID } from '../manifest.ts'
 import { heavyOutside, parseProcLines, sessionFrom, type Outside } from '../src/health/heavy.ts'
+import { Held, wanted } from '../src/health/held.ts'
 import { Told } from '../src/health/tell.ts'
 import { crashesIn, parseListeners, parsePs, treeOf, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
 
@@ -32,7 +33,9 @@ import { crashesIn, parseListeners, parsePs, treeOf, type ModuleHealth, type Poi
  * - `ps -A -o pid=,ppid=,pcpu=,args=` every `HEAVY_MS`: heavy work an agent session started on its
  *   own, outside the provider of heavy work in turn here if there is one (`services.find`, every `PROVIDER_MS`: its
  *   descriptor's `marks` say which runs are in turn). Each command line is classified into one word
- *   (`heavyWord`) and dropped; for a process so flagged, its `ps -E` once, for the agent CLI's session
+ *   (`heavyWord`) and dropped. Its CPU is kept over time, and it is flagged only when the provider's
+ *   descriptor wants it handed over (`wants`, judged by the protocol's `wantsQueued`; `src/health/held.ts`):
+ *   with no provider, nothing is. For a process so flagged, its `ps -E` once, for the agent CLI's session
  *   variable alone.
  * - With a provider of heavy work in turn here and the person's "Tell agents" on, the session that started it is told once
  *   (`messages.notifySession`, `src/health/tell.ts`), with its own command line, shortened, in the body.
@@ -49,7 +52,7 @@ export const LISTEN_MS = 15_000
 export const REGISTRY_MS = 30_000
 export const LOGS_MS = 60_000
 /** How often heavy work agent sessions started on their own is looked for (`src/health/heavy.ts`). */
-export const HEAVY_MS = 15_000
+export const HEAVY_MS = 5_000
 /** How often the host is asked who provides the provider of heavy work in turn here. */
 export const PROVIDER_MS = 60_000
 const DAY_MS = 24 * 60 * 60_000
@@ -169,6 +172,8 @@ export class Sampler {
   /** The person's "Tell agents", as the page last said it; on until it says otherwise. */
   private tell = true
   private readonly told = new Told()
+  /** Each heavy run's CPU over time, for the provider's `sustainedSeconds`. */
+  private readonly held = new Held()
 
   constructor(deps: Deps = DEPS) {
     this.deps = deps
@@ -298,6 +303,12 @@ export class Sampler {
       this.outside = []
       return
     }
+    this.held.see(found, now)
+    /* The command lines of the heavy processes only: to tell a whole suite from a targeted run, and for their own sessions' notices; dropped after. */
+    const heavy = new Set(found.map((one) => one.pid))
+    const commands = new Map(lines.filter((line) => heavy.has(line.pid)).map((line) => [line.pid, line.args]))
+    /* Only what the provider wants handed to it is flagged: on screen, in the Inbox and to the session. */
+    found = wanted(found, this.provider, this.held, commands)
     const live = new Set(found.map((one) => one.pid))
     for (const pid of [...this.sessions.keys()]) if (!live.has(pid)) this.sessions.delete(pid)
     for (const one of found.slice(0, 8)) {
@@ -315,8 +326,6 @@ export class Sampler {
     this.outside = found
     this.told.forget(live, now)
     if (!this.tell || !this.provider) return
-    /* The command lines of the flagged processes only, for their own sessions' notices; dropped after. */
-    const commands = new Map(lines.filter((line) => live.has(line.pid)).map((line) => [line.pid, line.args]))
     for (const due of this.told.due(found, this.provider, commands, now)) {
       this.told.mark(due, now)
       await (this.deps.ask ?? asksNothing)('messages.notifySession', { session: due.session, body: due.body, kind: 'report' }).catch(() => null)
