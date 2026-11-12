@@ -21,6 +21,8 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | `src/health/held.ts` | Pure: which of that work is FLAGGED — only what the provider's descriptor wants handed to it (`wants`, judged by the protocol's `workWant`/`wantsQueued`, never Monitor's own numbers), with each run's CPU kept over time (`Held`) for the rule's `sustainedSeconds`. No provider, nothing flagged. |
 | `src/health/tell.ts` | Pure: which notices are due (`Told`): only with a `work.queue` provider that takes that kind of work, only to a session attributed by its id, once per run, once per session and kind in `TELL_AGAIN_MS`. The sampler finds the provider (`services.find`, every `PROVIDER_MS`) and sends each (`messages.notifySession`). |
 | `src/health/network.ts` | Pure and shared by the page, the network sampler and the door: the machine's network throughput (not Monitor's traffic) — reading `netstat -ibn` / `/proc/net/dev` and `nettop`, which interfaces count (`VIRTUAL`), rates from counter growth (`grew`: a 32-bit wrap counted round, a reset counts nothing), the 5-minute history (`kept`), who a busy process belongs to (`ownerOf`), every sentence (`networkSaid` for the `health` tool's `network` view). |
+| `src/health/quality.ts` | Pure and shared by the page, the prober, the footer, the Inbox and the door: the connection's QUALITY (not its throughput) — which hosts are probed (`hostsFrom` Kehikot's record of traffic, `MONITOR_PROBE_HOSTS`, always github.com, and `PUBLIC_HOST`), per-host figures (`hostStats`: median round trip, loss, jitter, name lookup), the verdict and its documented `THRESHOLDS` (`judge`: Good, Fair, Poor, Offline, with a reason), the latency line, the speed test's figure (`speedOf`) and every sentence (`qualitySaid` for the `health` tool's `network` view). |
+| `health/quality.ts`, `health/speed.ts` | The server's one `QualitySampler`: a round every 10 s — a name lookup, then a TCP connection to port 443, per target (no ICMP) — only while asked in the last 30 s, as Health; 10 minutes of rounds in memory. The one `SpeedTest`: on demand only (`POST /api/speed`, the page's ticket), about 25 MB down and 10 MB up from Cloudflare, cancellable. |
 | `health/network.ts` | The server's one `NetworkSampler`: the counters every 2 s, the busiest processes (`nettop`, macOS) every 10 s — only while asked in the last 30 s, as Health. Served at `GET /api/network`. |
 | `src/wire/use-health.ts`, `src/wire/use-network.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s and `/api/network` every 2 s; the Health view: three glance tiles (CPU, Memory, and Network the row under them: one chart of two series, download and upload, a sparkline when narrow, the busiest processes under it only with room), a crash line and the table as its own box grows (`detailOf`). |
 | `src/header.ts` | The header items: pure functions of state. |
@@ -54,7 +56,7 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   (`shortCommand`), into the one notice to the session that started it, and nowhere else:
   never drawn, never in a snapshot or a tool's answer. Sample only while somebody looks
   (`WATCH_MS`), and keep only the ring in memory.
-- **Health is CPU, memory and the network.** The network is the machine's throughput, from
+- **Health is CPU, memory and the network.** The network is the machine's throughput and the connection's quality; the throughput is from
   interface counters (no root, nothing native); it is not the traffic, which is Kehikot's record
   of calls. A busy process is said by its executable's name and the module or agent session above
   it, never by its command line. The disk is not measured (0.14.0): what
@@ -78,7 +80,13 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   `agents: true` on View, Range, Chart, Paused and Caller; never on Clear.
   Health shows only View, Paused and Tell agents. The view is not kept.
 - **The footer says what is going on now** (the header says how Monitor is set
-  up): the traffic's readouts, the health's and the network's ("↓ … · ↑ …"), one item each, never in both rows.
+  up): the traffic's readouts, the health's, the connection's ("Connection good · 24 ms") and the
+  network's ("↓ … · ↑ …", optional: it goes first in a narrow row), one item each, never in both rows.
+- **The connection is probed, never pinged, and only while watched.** A probe is a name lookup and a TCP
+  connection to port 443; nothing is sent to a host but the handshake. The speed test spends data, so it
+  runs only when the person presses Test speed, never on its own, never for an agent, and says what it
+  downloads and uploads beside its button. A connection Poor or Offline for over a minute is one Inbox
+  item (`working`, `normal`) that goes when it recovers.
 - **Heavy work is not drawn on the page.** Each run is an Inbox item while it lasts
   (`src/inbox.ts`: `working`, `normal`, one per pid, reported whole when the runs change)
   and one footer item; the Health view keeps no line for it.

@@ -5,7 +5,7 @@ import type { ActivityItem } from 'kehikot-module-protocol'
 import type { Outside } from '../src/health/heavy.ts'
 import { healthItems } from '../src/footer.ts'
 import { judged } from '../src/health/model.ts'
-import { heavyItems, useHeavyInbox } from '../src/inbox.ts'
+import { heavyItems, useInbox } from '../src/inbox.ts'
 import { snapshotOf } from './health-fixtures.ts'
 
 afterEach(cleanup)
@@ -25,7 +25,7 @@ describe('heavy work in the Inbox', () => {
   test('appears while the run lasts, once per run, and clears when its process ends', () => {
     const sent: ActivityItem[][] = []
     const activity = (items: ActivityItem[]) => sent.push(items)
-    const { rerender } = renderHook(({ outside }: { outside: Outside[] }) => useHeavyInbox(activity, outside, 'Turns'), { initialProps: { outside: [RUN] } })
+    const { rerender } = renderHook(({ outside }: { outside: Outside[] }) => useInbox(activity, outside, 'Turns'), { initialProps: { outside: [RUN] } })
     expect(sent.at(-1)!.map((one) => one.id)).toEqual(['heavy-42'])
     /* The same run read again, its CPU moved: not reported again. */
     rerender({ outside: [{ ...RUN, pcpu: 180 }] })

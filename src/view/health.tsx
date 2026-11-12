@@ -1,6 +1,8 @@
 import { useRef } from 'react'
 import { Area, AreaChart, CartesianGrid, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts'
 
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { ChartContainer, type ChartConfig } from '@/components/ui/chart'
 import {
   average,
@@ -18,6 +20,8 @@ import {
   type Snapshot,
 } from '@/health/model'
 import { emptyNet, networkChartSaid, rateSaid, topSaid, type NetSnapshot } from '@/health/network'
+import { emptyQuality, hostSaid, SPEED_SAID, speedSaid, verdictSaid, withLatency, type QualityLevel, type SpeedState, type Verdict } from '@/health/quality'
+import type { SpeedAction } from '@/wire/use-network'
 import { Plot } from '@/view/plot'
 import { cpuTip, HEAD_HEIGHT, memoryTip, networkLayout, networkTip, niceTop, PAD_X, PAD_Y, ROW_GAP, SUB_HEIGHT, tileLayout, type TileLayout } from '@/view/tiles'
 import { useBox } from '@/view/use-box'
@@ -35,15 +39,28 @@ import { useBox } from '@/view/use-box'
 
 const CPU: ChartConfig = { cpu: { label: 'CPU (cores)', color: 'var(--series-1)' } }
 const MEMORY: ChartConfig = { gb: { label: 'Memory (GB)', color: 'var(--series-3)' } }
-/* Two series in one chart: download and upload, each its own colour, the upload's line dashed (never colour alone). */
-const NETWORK: ChartConfig = { down: { label: 'Download', color: 'var(--series-7)' }, up: { label: 'Upload', color: 'var(--series-2)' } }
+/*
+ * Three series in one chart: download and upload, each its own colour, the upload's line dashed; and the
+ * connection's round trip on its own scale, a thin dotted step line with no fill (never colour alone: each
+ * is named with its swatch in the tile's head).
+ */
+const NETWORK: ChartConfig = { down: { label: 'Download', color: 'var(--series-7)' }, up: { label: 'Upload', color: 'var(--series-2)' }, ms: { label: 'Latency', color: 'var(--series-5)' } }
+
+/* The verdict's badge: its word always, the tone only beside it. */
+const VERDICT_TONE: Record<QualityLevel, string> = {
+  measuring: 'border-border text-muted-foreground bg-transparent',
+  good: 'border-transparent bg-emerald-600/15 text-emerald-800 dark:text-emerald-300',
+  fair: 'border-transparent bg-amber-500/20 text-amber-800 dark:text-amber-300',
+  poor: 'border-transparent bg-destructive/15 text-destructive',
+  offline: 'border-transparent bg-destructive text-white',
+}
 
 const LEVEL_TONE: Record<Level, string> = { normal: 'text-muted-foreground', warn: 'text-amber-700 dark:text-amber-400', critical: 'text-destructive' }
 const LEVEL_SAID: Record<Level, string> = { normal: '', warn: 'warning', critical: 'critical' }
 
 const hm = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
-export function HealthView({ snapshot, judged, problem, now, box: given, net = emptyNet(), netProblem = null }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; box?: Box; net?: NetSnapshot; netProblem?: string | null }) {
+export function HealthView({ snapshot, judged, problem, now, box: given, net = emptyNet(), netProblem = null, onSpeed }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; box?: Box; net?: NetSnapshot; netProblem?: string | null; onSpeed?: (action: SpeedAction) => void }) {
   const box = useRef<HTMLDivElement>(null)
   const measured = useBox(box)
   const size = given ?? measured
@@ -56,13 +73,13 @@ export function HealthView({ snapshot, judged, problem, now, box: given, net = e
           {problem ?? (snapshot.why || 'Looking at the processes… the first figures come in a few seconds.')}
         </p>
       ) : (
-        <Shown snapshot={snapshot} judged={judged} problem={problem} now={now} detail={detail} width={size?.width ?? null} net={net} netProblem={netProblem} />
+        <Shown snapshot={snapshot} judged={judged} problem={problem} now={now} detail={detail} width={size?.width ?? null} net={net} netProblem={netProblem} onSpeed={onSpeed} />
       )}
     </div>
   )
 }
 
-function Shown({ snapshot, judged, problem, now, detail, width, net, netProblem }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null; net: NetSnapshot; netProblem: string | null }) {
+function Shown({ snapshot, judged, problem, now, detail, width, net, netProblem, onSpeed }: { snapshot: Snapshot; judged: readonly Judged[]; problem: string | null; now: number; detail: ReturnType<typeof detailOf>; width: number | null; net: NetSnapshot; netProblem: string | null; onSpeed?: (action: SpeedAction) => void }) {
   const crashed = crashesSaid(snapshot, now)
   return (
     <>
@@ -71,7 +88,7 @@ function Shown({ snapshot, judged, problem, now, detail, width, net, netProblem 
           {problem ?? snapshot.why}
         </p>
       ) : null}
-      <Tiles snapshot={snapshot} width={width} net={net} netProblem={netProblem} roomy={detail === 'full'} />
+      <Tiles snapshot={snapshot} width={width} net={net} netProblem={netProblem} roomy={detail === 'full'} onSpeed={onSpeed} />
       {/* Only a crash in the last hour is said, as one quiet line; otherwise nothing. */}
       {detail !== 'glance' && crashed ? (
         <p className="text-muted-foreground text-xs" data-testid="flagged">
@@ -89,7 +106,7 @@ function Shown({ snapshot, judged, problem, now, detail, width, net, netProblem 
   )
 }
 
-function Tiles({ snapshot, width, net, netProblem, roomy }: { snapshot: Snapshot; width: number | null; net: NetSnapshot; netProblem: string | null; roomy: boolean }) {
+function Tiles({ snapshot, width, net, netProblem, roomy, onSpeed }: { snapshot: Snapshot; width: number | null; net: NetSnapshot; netProblem: string | null; roomy: boolean; onSpeed?: (action: SpeedAction) => void }) {
   const layout = tileLayout(width)
   const sum = totals(snapshot)
   const over = totalsOver(snapshot).map((one) => ({ at: one.at, cpu: Math.round(one.cpu * 100) / 100, rss: one.rss, gb: Math.round((one.rss / 1e9) * 100) / 100 }))
@@ -106,45 +123,53 @@ function Tiles({ snapshot, width, net, netProblem, roomy }: { snapshot: Snapshot
           {(active) => (over.length > 1 ? <AreaPlot data={over} dataKey="gb" config={MEMORY} axes={layout.axes} active={active} format={(v) => `${v} GB`} /> : null)}
         </Plot>
       </Tile>
-      <NetworkTile net={net} problem={netProblem} width={width} roomy={roomy} />
+      <NetworkTile net={net} problem={netProblem} width={width} roomy={roomy} onSpeed={onSpeed} />
     </div>
   )
 }
 
 /**
- * The machine's network throughput: ONE chart at every size, download and upload as two series, the
- * current rates in its head line. Narrow, the chart is a sparkline with no axes; wide, it has axes and,
- * with room to spare, the busiest processes under it. It spans both columns.
+ * The machine's network: ONE chart at every size — download and upload as two series, and the
+ * connection's round trip as a third on its own scale — with the connection's verdict in its head line
+ * ("Good · 24 ms · 0% loss"; narrow, "Good · 24 ms") and the rates under it as the legend. Narrow, the
+ * chart is a sparkline with no axes; wide, it has axes and, with room to spare, each host's round trip
+ * and loss, the speed test and the busiest processes under it. It spans both columns.
  */
-function NetworkTile({ net, problem, width, roomy }: { net: NetSnapshot; problem: string | null; width: number | null; roomy: boolean }) {
+function NetworkTile({ net, problem, width, roomy, onSpeed }: { net: NetSnapshot; problem: string | null; width: number | null; roomy: boolean; onSpeed?: (action: SpeedAction) => void }) {
   const layout = networkLayout(width, roomy)
-  const data = net.points
+  const quality = net.quality ?? emptyQuality()
+  const data = withLatency(net.points, quality.points)
   const measured = net.down !== null && net.up !== null
-  const sub = problem ?? (net.why || (net.interfaces.length ? `${net.interfaces.join(', ')} · every ${net.every} s` : measured ? 'no interface carrying anything' : 'measuring…'))
-  const value = measured ? (
-    <span data-testid="tile-network-rates">
-      <Rate dataKey="down" arrow="↓" rate={net.down as number} />
-      <span className="text-muted-foreground font-normal"> · </span>
-      <Rate dataKey="up" arrow="↑" rate={net.up as number} />
-    </span>
-  ) : (
-    '—'
-  )
+  const ratesText = measured ? `↓ ${rateSaid(net.down as number)} · ↑ ${rateSaid(net.up as number)}` : ''
+  const where = net.interfaces.length ? `${net.interfaces.join(', ')} · every ${net.every} s` : measured ? 'no interface carrying anything' : 'measuring…'
+  const trouble = problem ?? (net.why || null)
+  const sub = trouble ?? (layout.compact ? ratesText || where : [ratesText, where].filter(Boolean).join(' · '))
+  const subNode =
+    trouble || !measured ? undefined : (
+      <span data-testid="tile-network-rates">
+        <Rate dataKey="down" arrow="↓" rate={net.down as number} />
+        <span> · </span>
+        <Rate dataKey="up" arrow="↑" rate={net.up as number} />
+        {layout.compact ? null : <span> · {where}</span>}
+      </span>
+    )
   return (
     <Tile
       layout={layout}
       className="@min-[360px]:col-span-2"
-      style={{ '--color-down': NETWORK.down?.color, '--color-up': NETWORK.up?.color } as React.CSSProperties}
+      style={{ '--color-down': NETWORK.down?.color, '--color-up': NETWORK.up?.color, '--color-ms': NETWORK.ms?.color } as React.CSSProperties}
       title="Network"
-      value={measured ? `↓ ${rateSaid(net.down as number)} · ↑ ${rateSaid(net.up as number)}` : '—'}
-      valueNode={value}
+      value={verdictSaid(quality.verdict, layout.compact)}
+      valueNode={<VerdictSaid verdict={quality.verdict} short={layout.compact} />}
       sub={sub}
-      subTone={problem || net.why ? 'text-destructive' : undefined}
+      subNode={subNode}
+      subTone={trouble ? 'text-destructive' : undefined}
       testId="tile-network"
     >
       <Plot said={networkChartSaid(net)} count={data.length > 1 ? data.length : 0} kind="line" height={layout.plot} tip={(i) => networkTip(data[i] as (typeof data)[number])} testId="tile-network">
         {(active) => (data.length > 1 ? <RatesPlot data={data} axes={layout.axes} active={active} /> : null)}
       </Plot>
+      {layout.top ? <Connection verdict={quality.verdict} hosts={quality.hosts} speed={quality.speed} onSpeed={onSpeed} /> : null}
       {layout.top && net.top?.length ? (
         <ul className="text-muted-foreground mt-1 flex min-w-0 flex-col text-[11px] tabular-nums" aria-label="Busiest processes" data-testid="tile-network-top">
           {net.top.map((one) => (
@@ -158,6 +183,69 @@ function NetworkTile({ net, problem, width, roomy }: { net: NetSnapshot; problem
   )
 }
 
+/** The verdict in the head line: its word as a badge, then the round trip (with the latency series' swatch) and, unless short, the loss. */
+function VerdictSaid({ verdict, short }: { verdict: Verdict; short: boolean }) {
+  const said = verdictSaid(verdict, short)
+  const rest = said.slice(verdict.word.length)
+  return (
+    <span className="inline-flex min-w-0 items-baseline gap-0" data-testid="tile-network-verdict" data-level={verdict.level}>
+      <Badge variant="outline" className={`px-1.5 py-0 text-[11px] leading-4 ${VERDICT_TONE[verdict.level]}`}>
+        {verdict.word}
+      </Badge>
+      {rest ? (
+        <span className="truncate">
+          {' · '}
+          <span aria-hidden className="mr-1 inline-block size-2 rounded-[2px] align-middle" style={{ background: 'var(--color-ms)' }} />
+          {rest.replace(/^ · /, '')}
+        </span>
+      ) : null}
+    </span>
+  )
+}
+
+/**
+ * With room: why the verdict is what it is, each host's round trip and loss over the last minute, and
+ * the speed test — what it spends said beside its button, the last result with when it was measured.
+ */
+function Connection({ verdict, hosts, speed, onSpeed }: { verdict: Verdict; hosts: ReturnType<typeof emptyQuality>['hosts']; speed: SpeedState; onSpeed?: (action: SpeedAction) => void }) {
+  const testing = speed.state === 'testing'
+  return (
+    <div className="text-muted-foreground mt-1 grid min-w-0 gap-x-4 gap-y-2 text-[11px] tabular-nums @min-[560px]:grid-cols-2" data-testid="tile-network-quality">
+      <div className="flex min-w-0 flex-col">
+        <p className="text-foreground truncate" title={`${verdict.word}: ${verdict.reason}`}>
+          {verdict.level === 'measuring' ? 'Probing the connection…' : `Connection ${verdict.word.toLowerCase()}: ${verdict.reason}`}
+        </p>
+        {hosts.length ? (
+          <ul aria-label="Round trip by host" data-testid="tile-network-hosts" className="flex min-w-0 flex-col">
+            {hosts.map((one) => (
+              <li key={one.host} className="truncate" title={hostSaid(one)}>
+                {hostSaid(one)}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+      <div className="flex min-w-0 flex-col gap-1" data-testid="tile-network-speed">
+        <div className="flex min-w-0 items-center gap-2">
+          <Button type="button" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={!onSpeed} onClick={() => onSpeed?.(testing ? 'cancel' : 'start')}>
+            {testing ? 'Cancel' : 'Test speed'}
+          </Button>
+          <span className="text-foreground truncate" role="status" aria-live="polite">
+            {testing
+              ? `Testing ${speed.phase === 'upload' ? 'upload' : 'download'}…`
+              : speed.last
+                ? `${speedSaid(speed.last)} · measured ${hm(speed.last.at)}`
+                : 'No speed test yet'}
+          </span>
+        </div>
+        <p>{SPEED_SAID}</p>
+        {speed.state === 'failed' ? <p className="text-destructive">The speed test failed: {speed.why}</p> : null}
+        {speed.state === 'cancelled' ? <p>The speed test was cancelled.</p> : null}
+      </div>
+    </div>
+  )
+}
+
 /** One rate in the head line, with its series' swatch: the chart's legend. */
 function Rate({ dataKey, arrow, rate }: { dataKey: 'down' | 'up'; arrow: string; rate: number }) {
   return (
@@ -168,22 +256,34 @@ function Rate({ dataKey, arrow, rate }: { dataKey: 'down' | 'up'; arrow: string;
   )
 }
 
-function RatesPlot({ data, axes, active }: { data: NetSnapshot['points']; axes: boolean; active: number | null }) {
+type RatePoint = NetSnapshot['points'][number] & { ms?: number | null }
+
+function RatesPlot({ data, axes, active }: { data: RatePoint[]; axes: boolean; active: number | null }) {
   const top = niceTop(Math.max(...data.map((one) => Math.max(one.down, one.up))))
+  const msTop = niceTop(Math.max(0, ...data.map((one) => one.ms ?? 0)))
   const first = data[0]?.at ?? 0
   const last = data.at(-1)?.at ?? 0
   const on = active === null ? null : data[active]
+  const latency = data.some((one) => typeof one.ms === 'number')
   return (
     <ChartContainer config={NETWORK} className="aspect-auto size-full">
       <AreaChart data={data} margin={axes ? { ...AXES_MARGIN, left: 8 } : MARGIN} accessibilityLayer={false}>
         {axes ? <CartesianGrid vertical={false} stroke="var(--grid)" /> : null}
         {axes ? <YAxis width={56} domain={[0, top]} ticks={[0, top]} tickFormatter={rateSaid} tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval={0} /> : <YAxis hide domain={[0, top]} />}
+        {/* The round trip's own scale, on the right with axes. */}
+        {axes && latency ? (
+          <YAxis yAxisId="ms" orientation="right" width={44} domain={[0, msTop]} ticks={[0, msTop]} tickFormatter={(v: number) => `${v} ms`} tickLine={false} axisLine={false} tick={{ fontSize: 10 }} interval={0} />
+        ) : (
+          <YAxis yAxisId="ms" hide domain={[0, msTop]} />
+        )}
         <XAxis hide={!axes} dataKey="at" type="number" domain={[first, last]} ticks={[first, last]} interval={0} tickLine={false} axisLine={false} height={16} tick={<EdgeTick format={hm} />} />
         {on ? <ReferenceLine x={on.at} stroke="var(--muted-foreground)" strokeDasharray="2 2" /> : null}
         <Area dataKey="down" type="monotone" stroke="var(--color-down)" fill="var(--color-down)" fillOpacity={0.2} strokeWidth={2} isAnimationActive={false} />
         <Area dataKey="up" type="monotone" stroke="var(--color-up)" fill="var(--color-up)" fillOpacity={0.15} strokeWidth={2} strokeDasharray="4 2" isAnimationActive={false} />
+        {latency ? <Area yAxisId="ms" dataKey="ms" type="stepAfter" stroke="var(--color-ms)" fill="none" fillOpacity={0} strokeWidth={1.5} strokeDasharray="1 2" isAnimationActive={false} /> : null}
         {on ? <ReferenceDot x={on.at} y={on.down} r={3} fill="var(--color-down)" stroke="var(--background)" /> : null}
         {on ? <ReferenceDot x={on.at} y={on.up} r={3} fill="var(--color-up)" stroke="var(--background)" /> : null}
+        {on && typeof on.ms === 'number' ? <ReferenceDot yAxisId="ms" x={on.at} y={on.ms} r={3} fill="var(--color-ms)" stroke="var(--background)" /> : null}
       </AreaChart>
     </ChartContainer>
   )
@@ -231,10 +331,10 @@ function AreaPlot<T extends { at: number }>({ data, dataKey, config, axes, activ
  * one row, the plot directly under it; side by side the words go on a line under the title. Nothing
  * overlays the plot but the tooltip, which sits outside it.
  */
-function Tile({ layout, className = '', style, title, value, valueNode, sub, subTone, testId, children }: { layout: TileLayout; className?: string; style?: React.CSSProperties; title: string; value: string; valueNode?: React.ReactNode; sub: string; subTone?: string; testId: string; children: React.ReactNode }) {
+function Tile({ layout, className = '', style, title, value, valueNode, sub, subNode, subTone, testId, children }: { layout: TileLayout; className?: string; style?: React.CSSProperties; title: string; value: string; valueNode?: React.ReactNode; sub: string; subNode?: React.ReactNode; subTone?: string; testId: string; children: React.ReactNode }) {
   const words = (
     <p className={`min-w-0 truncate text-[11px] ${subTone ?? 'text-muted-foreground'} ${layout.compact ? 'flex-1' : ''}`} style={{ lineHeight: `${layout.compact ? HEAD_HEIGHT : SUB_HEIGHT}px` }} title={sub}>
-      {sub}
+      {subNode ?? sub}
     </p>
   )
   return (

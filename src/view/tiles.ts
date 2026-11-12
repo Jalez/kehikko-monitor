@@ -52,8 +52,9 @@ export function tileLayout(width: number | null): TileLayout {
 
 /**
  * The Network tile's layout: one chart at every size, the whole row wide (it spans both columns), so a
- * sparkline under `AXES_FROM` and axes from there, as the others. Compact (title, words and both rates on
- * one row) in one column. The busiest processes go under the chart only when there is room (`top`).
+ * sparkline under `AXES_FROM` and axes from there, as the others. Compact (title, rates and the verdict on
+ * one row) in one column. Each host's round trip, the speed test and the busiest processes go under the
+ * chart only when there is room (`top`).
  */
 export function networkLayout(width: number | null, roomy = true): TileLayout & { top: boolean } {
   if (width === null || width <= 0) return { columns: 1, tile: null, axes: false, plot: SPARK_HEIGHT, compact: true, top: false }
@@ -140,8 +141,10 @@ export function memoryTip(point: { at: number; rss: number }, of: number): Tip {
   return { value: sizeSaid(point.rss), detail: of ? `${percent(point.rss / of)} of ${sizeSaid(of)}` : '', note: clock(point.at) }
 }
 
-export function networkTip(point: { at: number; down: number; up: number }): Tip {
-  return { value: `↓ ${rateSaid(point.down)}`, detail: `↑ ${rateSaid(point.up)}`, note: clock(point.at) }
+/** Both rates on the first line, the round trip of the probes at that moment on the second ("probes lost" when none answered), the time last. */
+export function networkTip(point: { at: number; down: number; up: number; ms?: number | null }): Tip {
+  const latency = point.ms === undefined ? '' : point.ms === null ? 'probes lost' : `${Math.round(point.ms)} ms round trip`
+  return { value: `↓ ${rateSaid(point.down)} · ↑ ${rateSaid(point.up)}`, detail: latency, note: clock(point.at) }
 }
 
 /** The top of a y-axis: a round number at or above the highest value. */

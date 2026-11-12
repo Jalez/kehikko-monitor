@@ -3,6 +3,7 @@ import { LIMITS, footerItemsSchema, type FooterItem } from 'kehikot-module-proto
 import { outsideSaid, outsideWhat } from './health/heavy.ts'
 import { percent, sizeSaid, totals, type Judged, type Snapshot } from './health/model.ts'
 import { rateSaid, ratesSaid, type NetSnapshot } from './health/network.ts'
+import { connectionSaid, type QualityLevel } from './health/quality.ts'
 import type { BudgetLine } from './traffic/budgets.ts'
 import type { CallerSummary } from './traffic/model.ts'
 
@@ -20,7 +21,10 @@ import type { CallerSummary } from './traffic/model.ts'
  * - the health of Kehikot and its modules, when Monitor has sampled it: the worst module (or the
  *   busiest, when none is worth a word), CPU of every running module as a meter of the computer's
  *   cores, and their memory;
- * - this computer's network throughput, "↓ 2.4 MB/s · ↑ 120 kB/s", once two readings are held;
+ * - the connection's quality, "Connection good · 24 ms", once the first probes are back (the word is
+ *   always said, so the level's colour is never alone);
+ * - this computer's network throughput, "↓ 2.4 MB/s · ↑ 120 kB/s", once two readings are held, the first
+ *   of the network's two to go when the row is narrow;
  * - Clear, beside the readouts it clears: it puts away what the page shows, so it is the person's
  *   alone, and it is here rather than in the header (never in both).
  */
@@ -91,6 +95,25 @@ export function healthItems(health: FooterState['health']): unknown[] {
   return items
 }
 
+const CONNECTION_LEVEL: Record<QualityLevel, 'normal' | 'warn' | 'critical'> = { measuring: 'normal', good: 'normal', fair: 'normal', poor: 'warn', offline: 'critical' }
+
+/** The connection readout: the verdict and the round trip. None before the first probes. */
+export function connectionItems(net: FooterState['network']): unknown[] {
+  const quality = net?.quality
+  if (!quality?.at) return []
+  const { verdict } = quality
+  return [
+    {
+      kind: 'text',
+      id: 'connection',
+      text: cut(connectionSaid(verdict), LIMITS.FOOTER_TEXT),
+      level: CONNECTION_LEVEL[verdict.level],
+      align: 'center',
+      tooltip: cut(`Internet connection: ${verdict.word}, ${verdict.reason}. Probed every ${quality.every} s while Monitor is open.`, LIMITS.FOOTER_TOOLTIP),
+    },
+  ]
+}
+
 /** The network readout: download and upload now. None before two readings. */
 export function networkItems(net: FooterState['network']): unknown[] {
   if (!net) return []
@@ -102,6 +125,8 @@ export function networkItems(net: FooterState['network']): unknown[] {
       id: 'network',
       text: cut(said, LIMITS.FOOTER_TEXT),
       align: 'center',
+      /* Beside the connection's verdict when it fits; the verdict stays when the row is narrow. */
+      optional: true,
       tooltip: cut(`This computer downloads ${rateSaid(net.down as number)} and uploads ${rateSaid(net.up as number)} now, over all its network interfaces, read every ${net.every} s.`, LIMITS.FOOTER_TOOLTIP),
     },
   ]
@@ -144,6 +169,7 @@ export function footerItems({ paused, rows, repeating, budgets, gap, problem, he
   if (problem) items.push({ kind: 'text', id: 'problem', text: cut(problem, LIMITS.FOOTER_TEXT), level: 'warn', align: 'center', tooltip: cut(problem, LIMITS.FOOTER_TOOLTIP) })
   else if (gap) items.push({ kind: 'text', id: 'gap', text: 'Some calls missed', level: 'warn', optional: true, tooltip: 'Some calls were made faster than Monitor read them and are not shown.' })
   items.push(...healthItems(health))
+  items.push(...connectionItems(network))
   items.push(...networkItems(network))
   items.push({ kind: 'run', id: 'clear', label: 'Clear', icon: 'x', align: 'end', tooltip: 'Put away what Monitor shows; it goes on reading from now.' })
   return footerItemsSchema.parse(items)
