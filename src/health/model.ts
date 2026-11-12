@@ -324,12 +324,12 @@ export function sizeSaid(bytes: number): string {
  * The `health` tool's answer.
  * ------------------------------------------------------------------ */
 
-export const HEALTH_VIEWS = ['now', 'processes'] as const
+export const HEALTH_VIEWS = ['now', 'processes', 'network'] as const
 
 /** Views an older agent may still ask for. */
 export const GONE_VIEWS = ['calls', 'restarts', 'disk'] as const
 export function goneSaid(view: string): string {
-  if (view === 'disk') return 'Health no longer measures the disk: what worktrees take, and cleaning them up, moved to the Worktrees module (its worktrees tool). Health keeps CPU and memory.'
+  if (view === 'disk') return 'Health no longer measures the disk: what worktrees take, and cleaning them up, moved to the Worktrees module (its worktrees tool). Health keeps CPU, memory and the network.'
   return `Health no longer tracks ${view === 'calls' ? 'call times or failures' : 'restarts'}. ${view === 'calls' ? 'The traffic tool has the calls.' : 'It says only a module that crashed in the last hour: see now.'}`
 }
 export type HealthView = (typeof HEALTH_VIEWS)[number]

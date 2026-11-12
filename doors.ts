@@ -1,9 +1,11 @@
 import { manifestSchema, type Manifest, type TrafficReadResult } from 'kehikot-module-protocol'
 import { askHost, establishBuild, mintTicket, type AskHostOptions, type Reply } from 'kehikot-module-protocol/serve'
 
+import { NETWORK as NET_SAMPLER } from './health/network.ts'
 import { SAMPLER } from './health/sampler.ts'
 import { DECLARED, ID, VERSION } from './manifest.ts'
 import { GONE_VIEWS, goneSaid, HEALTH_VIEWS, healthSaid, type HealthView, type Snapshot } from './src/health/model.ts'
+import { networkSaid, type NetSnapshot } from './src/health/network.ts'
 import { budgetLines } from './src/traffic/budgets.ts'
 import { isSkillPath, skillAt, skillDeclarations, serveFrom } from './skills.ts'
 import { REPEAT_MIN, REPEAT_WINDOW_MS, bytesSaid, callLine, callerName, callerOf, filtered, repeats, spoken, summary, type Caller } from './src/traffic/model.ts'
@@ -45,6 +47,9 @@ export const CLOCK = { now: () => Date.now() }
 /** Where the health of the processes comes from: the server's one sampler. The tests replace it. */
 export const HEALTH: { snapshot: (tell?: boolean) => Promise<Snapshot> } = { snapshot: (tell) => SAMPLER.snapshot(tell) }
 
+/** Where the machine's network throughput comes from: the server's one network sampler. The tests replace it. */
+export const NETWORK: { snapshot: () => Promise<NetSnapshot> } = { snapshot: () => NET_SAMPLER.snapshot() }
+
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const bad = (why: string, status = 400): Reply => ({ status, body: { ok: false, error: why } })
 const plain = (text: string): Reply => ({ status: 200, body: null, raw: { bytes: text, type: 'text/markdown; charset=utf-8' } })
@@ -81,12 +86,12 @@ export function tools() {
       description:
         'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), and whether one crashed in the last hour. '
         + 'Use it to answer "why is the computer slow", "which module is heavy", "did something crash". '
-        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, heavy work (a typecheck, tests, a build, an install) an agent session started on its own (not in turn through a module here that runs such work) and which session. `processes`: every module by CPU and memory. Calls, restarts and the disk are not tracked here: the traffic tool has the calls, and the Worktrees module what worktrees take on the disk. '
+        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, heavy work (a typecheck, tests, a build, an install) an agent session started on its own (not in turn through a module here that runs such work) and which session. `processes`: every module by CPU and memory. `network`: this computer’s download and upload speed now (all its network interfaces, not only Kehikot’s calls; read every 2 seconds), each of the last 5 minutes’ average and peak, and on macOS the busiest processes, marked when one is a Kehikot module or an agent session: use it to tell whether a big download or upload is hogging the link. Calls, restarts and the disk are not tracked here: the traffic tool has the calls, and the Worktrees module what worktrees take on the disk. '
         + 'Read-only: it stops and changes nothing, and reads only process figures, sizes, the start and crash lines of module logs, and what kind of heavy work a process is.',
       inputSchema: {
         type: 'object',
         properties: {
-          view: { type: 'string', enum: [...HEALTH_VIEWS], description: 'now or processes. Default: now.' },
+          view: { type: 'string', enum: [...HEALTH_VIEWS], description: 'now, processes or network. Default: now.' },
         },
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -99,6 +104,7 @@ async function health(args: Record<string, unknown>): Promise<string> {
   /* Calls and restarts were views until 0.10: say so, in a line, rather than answer with something else. */
   if ((GONE_VIEWS as readonly string[]).includes(asked)) return goneSaid(asked)
   const view: HealthView = (HEALTH_VIEWS as readonly string[]).includes(asked) ? (asked as HealthView) : 'now'
+  if (view === 'network') return networkSaid(await NETWORK.snapshot(), CLOCK.now())
   return healthSaid(await HEALTH.snapshot(), CLOCK.now(), view)
 }
 
@@ -240,6 +246,12 @@ export async function answer(
     if (method !== 'GET') return bad('Health is read with GET.', 405)
     /* The page carries the person's "Tell agents": `tell=0` when it is off. */
     return ok(await HEALTH.snapshot(query.get('tell') !== '0'))
+  }
+
+  /* The machine's network throughput, for the page: counters' rates and executables' names only. */
+  if (path === '/api/network') {
+    if (method !== 'GET') return bad('The network is read with GET.', 405)
+    return ok(await NETWORK.snapshot())
   }
 
   /* An unknown path under /api/ is ours to refuse, not Vite's to serve as a file. */

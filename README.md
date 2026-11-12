@@ -18,13 +18,15 @@ again and again, so redundant polling stands out.
   and each module's, marked "no reason given".
 - **Health.** Choose View › Health: how much CPU and memory each module and
   Kehikot use (sampled every 5 seconds). Two tiles (CPU, Memory) at a glance, one column
-  or two side by side as the container widens, a table of modules as it
-  grows. A module that crashed in the last hour is said in one quiet line;
+  or two side by side as the container widens, and under them Network: this
+  computer's download and upload speed in one chart, read every 2 seconds, a
+  sparkline in a small container, the busiest programs under it with room (macOS).
+  A table of modules as it grows. A module that crashed in the last hour is said in one quiet line;
   otherwise nothing. Calls and restarts are not tracked in Health: Traffic has
   the calls. What worktrees take on the disk is the Worktrees module's.
 - **Header and footer.** The header sets Monitor up: View, Range, Chart, Paused
   and Caller. The footer says what is going on: live or paused, the rate,
-  repeats, a limit, the worst module, total CPU and memory, and Clear.
+  repeats, a limit, the worst module, total CPU and memory, the network speed, and Clear.
 - **Agents ask, you watch.** The `traffic` tool answers "what is polling too
   much" from the same record, and `health` answers "what is slow or heavy right
   now"; both read only.

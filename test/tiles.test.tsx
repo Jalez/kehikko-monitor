@@ -157,7 +157,7 @@ describe('the tiles drawn at each width', () => {
     }
   })
 
-  test('two columns: the words go under the title, CPU and Memory side by side, no disk', () => {
+  test('two columns: the words go under the title, CPU and Memory side by side, Network the row under them, no disk', () => {
     draw(400)
     expect(screen.getByTestId('tiles').getAttribute('data-compact')).toBe('false')
     const [head, sub, plot] = [...screen.getByTestId('tile-cpu').children] as HTMLElement[]
@@ -166,7 +166,8 @@ describe('the tiles drawn at each width', () => {
     expect(plot?.getAttribute('data-testid')).toBe('tile-cpu-plot')
     expect(screen.getByTestId('tiles').className).toContain('@min-[360px]:grid-cols-2')
     expect(screen.getByTestId('tiles').className).not.toContain('grid-cols-3')
-    expect(screen.getByTestId('tiles').children).toHaveLength(2)
+    expect(screen.getByTestId('tiles').children).toHaveLength(3)
+    expect(screen.getByTestId('tile-network').className).toContain('@min-[360px]:col-span-2')
   })
 })
 
