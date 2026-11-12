@@ -1,5 +1,6 @@
 import { AGENT } from './heavy.ts'
 import { nameOf } from './model.ts'
+import { emptyQuality, latencyChartSaid, qualitySaid, type Quality } from './quality.ts'
 
 /**
  * The machine's network throughput: how fast this computer downloads and uploads right now, and over
@@ -206,9 +207,11 @@ export interface NetSnapshot {
   top: TopProc[] | null
   /** A sentence when the counters could not be read. */
   why: string
+  /** The connection's quality: probes, the verdict, the last speed test (`quality.ts`). */
+  quality: Quality
 }
 
-export const emptyNet = (): NetSnapshot => ({ at: 0, every: 2, down: null, up: null, points: [], interfaces: [], top: null, why: '' })
+export const emptyNet = (): NetSnapshot => ({ at: 0, every: 2, down: null, up: null, points: [], interfaces: [], top: null, why: '', quality: emptyQuality() })
 
 /* ------------------------------------------------------------------ *
  * Sentences.
@@ -232,9 +235,10 @@ export function ratesSaid(net: Pick<NetSnapshot, 'down' | 'up'>): string {
 
 /** The chart's sentence, for a screen reader. */
 export function networkChartSaid(net: NetSnapshot): string {
-  if (net.down === null || net.up === null) return 'Network: measuring…'
+  const quality = net.quality ? latencyChartSaid(net.quality) : ''
+  if (net.down === null || net.up === null) return `Network: measuring…${quality}`
   const peak = peakOf(net.points)
-  return `This computer downloads ${rateSaid(net.down)} and uploads ${rateSaid(net.up)} now; over the last ${Math.max(1, Math.round(spanOf(net.points) / 60_000))} min the most was ${rateSaid(peak.down)} down and ${rateSaid(peak.up)} up.`
+  return `This computer downloads ${rateSaid(net.down)} and uploads ${rateSaid(net.up)} now; over the last ${Math.max(1, Math.round(spanOf(net.points) / 60_000))} min the most was ${rateSaid(peak.down)} down and ${rateSaid(peak.up)} up.${quality}`
 }
 
 export const peakOf = (points: readonly NetPoint[]): { down: number; up: number } => ({
@@ -253,13 +257,17 @@ export function topSaid(one: TopProc): string {
 }
 
 /**
- * The `health` tool's `network` view: the rate now, the history in minute-long steps with its peak,
+ * The `health` tool's `network` view: the connection's quality (the verdict, each host, the last speed
+ * test), then the rate now, the history in minute-long steps with its peak,
  * and the busiest processes when this computer can say them.
  */
 export function networkSaid(net: NetSnapshot, now: number): string {
-  if (!net.at) return net.why || 'Monitor has not read the network yet. Ask again in a few seconds.'
-  if (net.down === null || net.up === null) return net.why || `Monitor has read the network once; the rate comes with the next reading, in ${net.every} s. Ask again.`
+  /* The connection's quality first: whether it is good is what an agent about to push or download needs. */
+  const quality = net.quality ? [...qualitySaid(net.quality, now), ''] : []
+  if (!net.at) return [...quality, net.why || 'Monitor has not read the network yet. Ask again in a few seconds.'].join('\n')
+  if (net.down === null || net.up === null) return [...quality, net.why || `Monitor has read the network once; the rate comes with the next reading, in ${net.every} s. Ask again.`].join('\n')
   const lines: string[] = [
+    ...quality,
     `This computer's network now: download ${rateSaid(net.down)}, upload ${rateSaid(net.up)} (${net.interfaces.length ? net.interfaces.join(', ') : 'no interface carrying anything'}; loopback and virtual interfaces left out).`,
   ]
   const peak = peakOf(net.points)

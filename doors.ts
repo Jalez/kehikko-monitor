@@ -1,7 +1,9 @@
 import { manifestSchema, type Manifest, type TrafficReadResult } from 'kehikot-module-protocol'
-import { askHost, establishBuild, mintTicket, type AskHostOptions, type Reply } from 'kehikot-module-protocol/serve'
+import { askHost, establishBuild, mintTicket, refuseTicket, type AskHostOptions, type Reply } from 'kehikot-module-protocol/serve'
 
 import { NETWORK as NET_SAMPLER } from './health/network.ts'
+import { QUALITY } from './health/quality.ts'
+import { SPEED as SPEED_TEST } from './health/speed.ts'
 import { SAMPLER } from './health/sampler.ts'
 import { DECLARED, ID, VERSION } from './manifest.ts'
 import { GONE_VIEWS, goneSaid, HEALTH_VIEWS, healthSaid, type HealthView, type Snapshot } from './src/health/model.ts'
@@ -47,8 +49,24 @@ export const CLOCK = { now: () => Date.now() }
 /** Where the health of the processes comes from: the server's one sampler. The tests replace it. */
 export const HEALTH: { snapshot: (tell?: boolean) => Promise<Snapshot> } = { snapshot: (tell) => SAMPLER.snapshot(tell) }
 
-/** Where the machine's network throughput comes from: the server's one network sampler. The tests replace it. */
-export const NETWORK: { snapshot: () => Promise<NetSnapshot> } = { snapshot: () => NET_SAMPLER.snapshot() }
+/**
+ * Where the machine's network comes from: the server's one network sampler (the throughput) and its one
+ * prober (the connection's quality, with the speed test's state). `wait`: wait for the first round of
+ * probes when none is held (the tool answers once; the page reads again in 2 s). The tests replace it.
+ */
+export const NETWORK: { snapshot: (wait?: boolean) => Promise<NetSnapshot> } = {
+  snapshot: async (wait = false) => {
+    const [net, quality] = await Promise.all([NET_SAMPLER.snapshot(), QUALITY.snapshot(wait)])
+    return { ...net, quality }
+  },
+}
+
+/** The speed test, started and cancelled from the page. The tests replace it. */
+export const SPEED: { start: () => void; cancel: () => void; state: () => unknown } = {
+  start: () => void SPEED_TEST.start(),
+  cancel: () => SPEED_TEST.cancel(),
+  state: () => SPEED_TEST.state(),
+}
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const bad = (why: string, status = 400): Reply => ({ status, body: { ok: false, error: why } })
@@ -86,8 +104,8 @@ export function tools() {
       description:
         'What is slow or heavy right now among Kehikot and its modules on this computer: each one\'s CPU and memory (its server and every process it started, sampled every 5 seconds), and whether one crashed in the last hour. '
         + 'Use it to answer "why is the computer slow", "which module is heavy", "did something crash". '
-        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, heavy work (a typecheck, tests, a build, an install) an agent session started on its own (not in turn through a module here that runs such work) and which session. `processes`: every module by CPU and memory. `network`: this computer’s download and upload speed now (all its network interfaces, not only Kehikot’s calls; read every 2 seconds), each of the last 5 minutes’ average and peak, and on macOS the busiest processes, marked when one is a Kehikot module or an agent session: use it to tell whether a big download or upload is hogging the link. Calls, restarts and the disk are not tracked here: the traffic tool has the calls, and the Worktrees module what worktrees take on the disk. '
-        + 'Read-only: it stops and changes nothing, and reads only process figures, sizes, the start and crash lines of module logs, and what kind of heavy work a process is.',
+        + '`now` (default): the worst first, the totals, a module that crashed in the last hour, heavy work (a typecheck, tests, a build, an install) an agent session started on its own (not in turn through a module here that runs such work) and which session. `processes`: every module by CPU and memory. `network`: whether this computer’s internet connection is good — a verdict (Good, Fair, Poor or Offline) and why, the round trip, probes lost, jitter and name lookups to each host Kehikot calls out to (github.com, the trackers it reads) and to a public address, probed every 10 seconds, and the last speed test the person ran: ask it before a long push, pull or download; then the download and upload speed now (all its network interfaces, not only Kehikot’s calls; read every 2 seconds), each of the last 5 minutes’ average and peak, and on macOS the busiest processes, marked when one is a Kehikot module or an agent session: use it to tell whether a big download or upload is hogging the link. Calls, restarts and the disk are not tracked here: the traffic tool has the calls, and the Worktrees module what worktrees take on the disk. '
+        + 'Read-only: it stops and changes nothing (it never runs a speed test), and reads only process figures, sizes, the start and crash lines of module logs, and what kind of heavy work a process is.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -104,7 +122,7 @@ async function health(args: Record<string, unknown>): Promise<string> {
   /* Calls and restarts were views until 0.10: say so, in a line, rather than answer with something else. */
   if ((GONE_VIEWS as readonly string[]).includes(asked)) return goneSaid(asked)
   const view: HealthView = (HEALTH_VIEWS as readonly string[]).includes(asked) ? (asked as HealthView) : 'now'
-  if (view === 'network') return networkSaid(await NETWORK.snapshot(), CLOCK.now())
+  if (view === 'network') return networkSaid(await NETWORK.snapshot(true), CLOCK.now())
   return healthSaid(await HEALTH.snapshot(), CLOCK.now(), view)
 }
 
@@ -225,7 +243,7 @@ export async function answer(
   path: string,
   query: URLSearchParams,
   body: Record<string, unknown> | null,
-  _ticket: string | null,
+  ticket: string | null,
 ): Promise<Reply | null> {
   if (path === '/healthz') return ok({ ok: true, id: ID, version: VERSION })
 
@@ -252,6 +270,21 @@ export async function answer(
   if (path === '/api/network') {
     if (method !== 'GET') return bad('The network is read with GET.', 405)
     return ok(await NETWORK.snapshot())
+  }
+
+  /*
+   * The speed test, on demand from the page only (it spends data): `{ action: 'start' | 'cancel' }`, with
+   * this process's ticket. Answered at once with the test's state; the page follows it on /api/network.
+   */
+  if (path === '/api/speed') {
+    if (method !== 'POST') return bad('The speed test is started with POST.', 405)
+    const refused = refuseTicket(ticket, TICKET)
+    if (refused) return refused
+    const action = body?.action
+    if (action === 'start') SPEED.start()
+    else if (action === 'cancel') SPEED.cancel()
+    else return bad('Say start or cancel.')
+    return ok({ ok: true, speed: SPEED.state() })
   }
 
   /* An unknown path under /api/ is ours to refuse, not Vite's to serve as a file. */

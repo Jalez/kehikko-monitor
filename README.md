@@ -21,15 +21,22 @@ again and again, so redundant polling stands out.
   or two side by side as the container widens, and under them Network: this
   computer's download and upload speed in one chart, read every 2 seconds, a
   sparkline in a small container, the busiest programs under it with room (macOS).
+  Its head says whether the internet connection is good — Good, Fair, Poor or
+  Offline, with the round trip and loss ("Good · 24 ms · 0% loss") — from a
+  TCP connection to port 443 of github.com, the trackers Kehikot calls and
+  1.1.1.1 every 10 seconds while Monitor is open (add hosts with
+  `MONITOR_PROBE_HOSTS`). With room, each host's round trip and loss, and Test
+  speed: it downloads about 25 MB and uploads about 10 MB from Cloudflare,
+  only when you press it.
   A table of modules as it grows. A module that crashed in the last hour is said in one quiet line;
   otherwise nothing. Calls and restarts are not tracked in Health: Traffic has
   the calls. What worktrees take on the disk is the Worktrees module's.
 - **Header and footer.** The header sets Monitor up: View, Range, Chart, Paused
   and Caller. The footer says what is going on: live or paused, the rate,
-  repeats, a limit, the worst module, total CPU and memory, the network speed, and Clear.
+  repeats, a limit, the worst module, total CPU and memory, the connection ("Connection good · 24 ms"), the network speed, and Clear.
 - **Agents ask, you watch.** The `traffic` tool answers "what is polling too
   much" from the same record, and `health` answers "what is slow or heavy right
-  now"; both read only.
+  now" and, in its `network` view, whether the connection is good; both read only.
 
 Everything stays on this computer. Kehikot keeps the record in its own memory
 (the last 5,000 calls): addresses and reasons, never what a call carried — no

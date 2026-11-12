@@ -235,15 +235,18 @@ describe('the Network tile', () => {
     expect(networkLayout(300)).toMatchObject({ axes: true, plot: AXES_HEIGHT, compact: true, top: false })
     expect(networkLayout(700)).toMatchObject({ axes: true, compact: false, top: true })
     expect(networkLayout(700, false)).toMatchObject({ top: false })
-    expect(networkTip({ at: NOW, down: 2_400_000, up: 120_000 })).toMatchObject({ value: '↓ 2.4 MB/s', detail: '↑ 120 kB/s' })
+    expect(networkTip({ at: NOW, down: 2_400_000, up: 120_000 })).toMatchObject({ value: '↓ 2.4 MB/s · ↑ 120 kB/s', detail: '' })
+    expect(networkTip({ at: NOW, down: 2_400_000, up: 120_000, ms: 24.4 })).toMatchObject({ detail: '24 ms round trip' })
+    expect(networkTip({ at: NOW, down: 2_400_000, up: 120_000, ms: null })).toMatchObject({ detail: 'probes lost' })
   })
 
-  test('large: both rates in the head line as the legend, one chart of two series, the busiest processes under it', () => {
+  test('large: both rates under the head line as the legend, one chart, the busiest processes under it', () => {
     const net = netOf(NOW, { top: [{ pid: 1, name: 'zen', down: 1_200_000, up: 4000, owner: { kind: 'agent', name: 'claude' } }] })
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} net={net} box={{ width: 700, height: 800 }} />)
     expect(screen.getByRole('region', { name: 'Network' })).toBeTruthy()
     expect(screen.getByTestId('tiles').children).toHaveLength(3)
-    expect(screen.getByTestId('tile-network-value').textContent).toBe('↓ 2.4 MB/s · ↑ 120 kB/s')
+    expect(screen.getByTestId('tile-network-value').textContent).toBe('Measuring')
+    expect(screen.getByTestId('tile-network-rates').textContent).toBe('↓ 2.4 MB/s · ↑ 120 kB/s · en0 · every 2 s')
     expect([...screen.getByTestId('tile-network-rates').querySelectorAll('[data-series]')].map((one) => one.getAttribute('data-series'))).toEqual(['down', 'up'])
     expect(screen.getByTestId('tile-network-plot').getAttribute('data-kind')).toBe('line')
     expect(screen.getByTestId('tile-network-plot').style.height).toBe(`${AXES_HEIGHT}px`)
@@ -254,7 +257,7 @@ describe('the Network tile', () => {
   test('small: the same chart as a sparkline, the minimal head with both rates, no busiest list', () => {
     const net = netOf(NOW, { top: [{ pid: 1, name: 'zen', down: 1_200_000, up: 4000, owner: null }] })
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} net={net} box={{ width: 220, height: 200 }} />)
-    expect(screen.getByTestId('tile-network-value').textContent).toBe('↓ 2.4 MB/s · ↑ 120 kB/s')
+    expect(screen.getByTestId('tile-network-rates').textContent).toBe('↓ 2.4 MB/s · ↑ 120 kB/s')
     expect(screen.getByTestId('tile-network-plot').style.height).toBe(`${SPARK_HEIGHT}px`)
     expect(screen.queryByTestId('tile-network-top')).toBeNull()
   })
@@ -273,7 +276,7 @@ describe('the Network tile', () => {
 
   test('before two readings it measures; a server that cannot say is said in the tile', () => {
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} net={emptyNet()} netProblem="Monitor’s server answered 404." box={{ width: 700, height: 800 }} />)
-    expect(screen.getByTestId('tile-network-value').textContent).toBe('—')
+    expect(screen.queryByTestId('tile-network-rates')).toBeNull()
     expect(screen.getByRole('region', { name: 'Network' }).textContent).toContain('answered 404')
   })
 })

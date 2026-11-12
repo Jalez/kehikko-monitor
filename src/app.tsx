@@ -12,9 +12,9 @@ import { RANGES, STYLES, callerOf, colourOrder, repeats, summary, type Caller, t
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
 import { useHealth, type Health } from '@/wire/use-health'
-import { useNetwork, type Network } from '@/wire/use-network'
+import { useNetwork, type Network, type SpeedAction } from '@/wire/use-network'
 import { emptyNet } from '@/health/network'
-import { useHeavyInbox } from '@/inbox'
+import { useInbox } from '@/inbox'
 import { useOnScreen } from '@/wire/use-on-screen'
 
 import { HealthView } from '@/view/health'
@@ -76,8 +76,8 @@ export function App() {
   const health = useHealth(host.where === 'hosted', resting, undefined, undefined, tell)
   /* The machine's network throughput, every 2 s: the Health view's Network tile and a footer readout, in both views. */
   const network = useNetwork(host.where === 'hosted', resting)
-  /* Each run of heavy work an agent started on its own is an Inbox item while it runs (`src/inbox.ts`). */
-  useHeavyInbox(host.where === 'hosted' ? host.activity : undefined, health.snapshot.outside, health.snapshot.provider)
+  /* Each run of heavy work an agent started on its own is an Inbox item while it runs, and so is a connection Poor or Offline for over a minute (`src/inbox.ts`). */
+  useInbox(host.where === 'hosted' ? host.activity : undefined, health.snapshot.outside, health.snapshot.provider, network.net.quality)
 
   /* A colour follows its caller from the moment it first called, whatever the filter or the ranks. */
   useEffect(() => {
@@ -108,6 +108,7 @@ export function App() {
       traffic={traffic}
       health={health}
       network={network}
+      onSpeed={network.speed}
       items={items}
       state={state}
       order={order}
@@ -132,6 +133,7 @@ export function Screen({
   onFilter = () => {},
   onPress = () => {},
   onShow = () => {},
+  onSpeed,
   now: given,
 }: {
   host: Host
@@ -145,6 +147,8 @@ export function Screen({
   onFilter?: (filter: Filter) => void
   onPress?: (press: Press) => void
   onShow?: (repeat: Repeat) => void
+  /** Start or cancel the speed test (the Network tile's Test speed, with room). */
+  onSpeed?: (action: SpeedAction) => void
   now?: number
 }) {
   const server = useServerStanding()
@@ -195,7 +199,7 @@ export function Screen({
         {cover ? (
           <Cover state={cover} name="Monitor" onRetry={() => setAgain((n) => n + 1)} />
         ) : state.view === 'health' ? (
-          <HealthView snapshot={health.snapshot} judged={ranked} problem={health.problem} now={now} net={network.net} netProblem={network.problem} />
+          <HealthView snapshot={health.snapshot} judged={ranked} problem={health.problem} now={now} net={network.net} netProblem={network.problem} onSpeed={onSpeed} />
         ) : traffic.problem && !traffic.calls.length ? (
           <p className="text-muted-foreground rounded-md border p-3 text-xs" role="status">
             {traffic.problem}
