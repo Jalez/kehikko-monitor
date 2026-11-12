@@ -2,6 +2,7 @@ import { LIMITS, footerItemsSchema, type FooterItem } from 'kehikot-module-proto
 
 import { outsideSaid, outsideWhat } from './health/heavy.ts'
 import { percent, sizeSaid, totals, type Judged, type Snapshot } from './health/model.ts'
+import { rateSaid, ratesSaid, type NetSnapshot } from './health/network.ts'
 import type { BudgetLine } from './traffic/budgets.ts'
 import type { CallerSummary } from './traffic/model.ts'
 
@@ -19,6 +20,7 @@ import type { CallerSummary } from './traffic/model.ts'
  * - the health of Kehikot and its modules, when Monitor has sampled it: the worst module (or the
  *   busiest, when none is worth a word), CPU of every running module as a meter of the computer's
  *   cores, and their memory;
+ * - this computer's network throughput, "↓ 2.4 MB/s · ↑ 120 kB/s", once two readings are held;
  * - Clear, beside the readouts it clears: it puts away what the page shows, so it is the person's
  *   alone, and it is here rather than in the header (never in both).
  */
@@ -31,6 +33,8 @@ export interface FooterState {
   problem: string | null
   /** The processes' health: the latest snapshot and its modules judged, the worst first. */
   health?: { snapshot: Snapshot; judged: readonly Judged[] } | null
+  /** The machine's network throughput, as the server last read it. */
+  network?: NetSnapshot | null
 }
 
 const cut = (text: string, most: number) => (text.length > most ? `${text.slice(0, most - 1)}…` : text)
@@ -87,7 +91,23 @@ export function healthItems(health: FooterState['health']): unknown[] {
   return items
 }
 
-export function footerItems({ paused, rows, repeating, budgets, gap, problem, health = null }: FooterState): FooterItem[] {
+/** The network readout: download and upload now. None before two readings. */
+export function networkItems(net: FooterState['network']): unknown[] {
+  if (!net) return []
+  const said = ratesSaid(net)
+  if (!said) return []
+  return [
+    {
+      kind: 'text',
+      id: 'network',
+      text: cut(said, LIMITS.FOOTER_TEXT),
+      align: 'center',
+      tooltip: cut(`This computer downloads ${rateSaid(net.down as number)} and uploads ${rateSaid(net.up as number)} now, over all its network interfaces, read every ${net.every} s.`, LIMITS.FOOTER_TOOLTIP),
+    },
+  ]
+}
+
+export function footerItems({ paused, rows, repeating, budgets, gap, problem, health = null, network = null }: FooterState): FooterItem[] {
   const items: unknown[] = [
     paused
       ? { kind: 'text', id: 'live', text: 'Paused', level: 'warn', tooltip: 'The picture stands still. Turn Paused off to go on.' }
@@ -124,6 +144,7 @@ export function footerItems({ paused, rows, repeating, budgets, gap, problem, he
   if (problem) items.push({ kind: 'text', id: 'problem', text: cut(problem, LIMITS.FOOTER_TEXT), level: 'warn', align: 'center', tooltip: cut(problem, LIMITS.FOOTER_TOOLTIP) })
   else if (gap) items.push({ kind: 'text', id: 'gap', text: 'Some calls missed', level: 'warn', optional: true, tooltip: 'Some calls were made faster than Monitor read them and are not shown.' })
   items.push(...healthItems(health))
+  items.push(...networkItems(network))
   items.push({ kind: 'run', id: 'clear', label: 'Clear', icon: 'x', align: 'end', tooltip: 'Put away what Monitor shows; it goes on reading from now.' })
   return footerItemsSchema.parse(items)
 }

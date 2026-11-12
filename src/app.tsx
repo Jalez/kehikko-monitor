@@ -12,6 +12,8 @@ import { RANGES, STYLES, callerOf, colourOrder, repeats, summary, type Caller, t
 import { useKehikot, type Host } from '@/wire/use-kehikot'
 import { useTraffic, type Traffic } from '@/wire/use-traffic'
 import { useHealth, type Health } from '@/wire/use-health'
+import { useNetwork, type Network } from '@/wire/use-network'
+import { emptyNet } from '@/health/network'
 import { useHeavyInbox } from '@/inbox'
 import { useOnScreen } from '@/wire/use-on-screen'
 
@@ -72,6 +74,8 @@ export function App() {
   const traffic = useTraffic(host.where === 'hosted' ? host.request : null, resting, clearedAt)
   /* Read whatever the view: the footer says the health in both. */
   const health = useHealth(host.where === 'hosted', resting, undefined, undefined, tell)
+  /* The machine's network throughput, every 2 s: the Health view's Network tile and a footer readout, in both views. */
+  const network = useNetwork(host.where === 'hosted', resting)
   /* Each run of heavy work an agent started on its own is an Inbox item while it runs (`src/inbox.ts`). */
   useHeavyInbox(host.where === 'hosted' ? host.activity : undefined, health.snapshot.outside, health.snapshot.provider)
 
@@ -103,6 +107,7 @@ export function App() {
       host={host}
       traffic={traffic}
       health={health}
+      network={network}
       items={items}
       state={state}
       order={order}
@@ -119,6 +124,7 @@ export function Screen({
   host,
   traffic,
   health = { snapshot: emptySnapshot(), problem: null },
+  network = { net: emptyNet(), problem: null },
   items,
   state,
   order,
@@ -131,6 +137,7 @@ export function Screen({
   host: Host
   traffic: Traffic
   health?: Health
+  network?: Network
   items: HeaderItem[]
   state: HeaderState
   order: readonly Caller[]
@@ -160,7 +167,7 @@ export function Screen({
     ? JSON.stringify(
         cover
           ? []
-          : footerItems({ paused: state.paused, rows, repeating: found.length, budgets: budgetLines(traffic.limits, traffic.budgets), gap: Boolean(traffic.gap), problem: traffic.problem ?? null, health: { snapshot: health.snapshot, judged: ranked } }),
+          : footerItems({ paused: state.paused, rows, repeating: found.length, budgets: budgetLines(traffic.limits, traffic.budgets), gap: Boolean(traffic.gap), problem: traffic.problem ?? null, health: { snapshot: health.snapshot, judged: ranked }, network: network.net }),
       )
     : null
   const { footer } = host
@@ -188,7 +195,7 @@ export function Screen({
         {cover ? (
           <Cover state={cover} name="Monitor" onRetry={() => setAgain((n) => n + 1)} />
         ) : state.view === 'health' ? (
-          <HealthView snapshot={health.snapshot} judged={ranked} problem={health.problem} now={now} />
+          <HealthView snapshot={health.snapshot} judged={ranked} problem={health.problem} now={now} net={network.net} netProblem={network.problem} />
         ) : traffic.problem && !traffic.calls.length ? (
           <p className="text-muted-foreground rounded-md border p-3 text-xs" role="status">
             {traffic.problem}

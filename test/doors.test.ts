@@ -78,7 +78,7 @@ describe('the doors', () => {
   test('the calls, restarts and disk views are not tracked any more, and say so in a line', async () => {
     HEALTH.snapshot = async () => snapshotOf(NOW)
     const tool = tools().find((one) => one.name === 'health')!
-    expect((tool.inputSchema.properties.view as { enum: string[] }).enum).toEqual(['now', 'processes'])
+    expect((tool.inputSchema.properties.view as { enum: string[] }).enum).toEqual(['now', 'processes', 'network'])
     const calls = (await rpc('tools/call', { name: 'health', arguments: { view: 'calls' } })).result.content![0]!.text
     expect(calls).toBe('Health no longer tracks call times or failures. The traffic tool has the calls.')
     const restarts = (await rpc('tools/call', { name: 'health', arguments: { view: 'restarts' } })).result.content![0]!.text

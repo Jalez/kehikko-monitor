@@ -1,4 +1,5 @@
 import { percent, sizeSaid } from '../health/model.ts'
+import { rateSaid } from '../health/network.ts'
 
 /**
  * How the Health view's glance tiles are laid out at a width, and what each chart's tooltip says. Pure: the page draws it, the tests read it.
@@ -47,6 +48,18 @@ export function tileLayout(width: number | null): TileLayout {
   const tile = Math.floor((width - DIVIDER * (columns - 1)) / columns)
   const axes = tile >= AXES_FROM
   return { columns, tile, axes, plot: axes ? AXES_HEIGHT : SPARK_HEIGHT, compact: columns === 1 }
+}
+
+/**
+ * The Network tile's layout: one chart at every size, the whole row wide (it spans both columns), so a
+ * sparkline under `AXES_FROM` and axes from there, as the others. Compact (title, words and both rates on
+ * one row) in one column. The busiest processes go under the chart only when there is room (`top`).
+ */
+export function networkLayout(width: number | null, roomy = true): TileLayout & { top: boolean } {
+  if (width === null || width <= 0) return { columns: 1, tile: null, axes: false, plot: SPARK_HEIGHT, compact: true, top: false }
+  const columns = columnsOf(width)
+  const axes = width >= AXES_FROM
+  return { columns, tile: width, axes, plot: axes ? AXES_HEIGHT : SPARK_HEIGHT, compact: columns === 1, top: roomy && columns > 1 }
 }
 
 /** How tall the two tiles stand in one column, in px: two plots and the hairline between. */
@@ -125,6 +138,10 @@ export function cpuTip(point: { at: number; cpu: number }, of: number): Tip {
 
 export function memoryTip(point: { at: number; rss: number }, of: number): Tip {
   return { value: sizeSaid(point.rss), detail: of ? `${percent(point.rss / of)} of ${sizeSaid(of)}` : '', note: clock(point.at) }
+}
+
+export function networkTip(point: { at: number; down: number; up: number }): Tip {
+  return { value: `↓ ${rateSaid(point.down)}`, detail: `↑ ${rateSaid(point.up)}`, note: clock(point.at) }
 }
 
 /** The top of a y-axis: a round number at or above the highest value. */

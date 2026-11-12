@@ -19,12 +19,12 @@ const state: HeaderState = { view: 'health', range: 5, style: 'lines', paused: f
 const traffic = { calls: [call({ at: NOW - 1000, by: 'kehikot.kanban', ms: 30 })], budgets: [], limits: null, processes: null, problem: null, gap: false, at: NOW }
 
 describe('the Health view', () => {
-  test('two tiles, each with its number in words and its chart as an image of a sentence; no Calls or Restarts', () => {
+  test('three tiles — CPU, Memory and Network — each with its number in words and its chart as an image of a sentence; no Calls or Restarts', () => {
     const snapshot = snapshotOf(NOW)
     render(<HealthView snapshot={snapshot} judged={judged(snapshot, NOW)} problem={null} now={NOW} />)
-    for (const name of ['CPU', 'Memory']) expect(screen.getByRole('region', { name })).toBeTruthy()
+    for (const name of ['CPU', 'Memory', 'Network']) expect(screen.getByRole('region', { name })).toBeTruthy()
     for (const name of ['Calls', 'Restarts', 'Disk']) expect(screen.queryByRole('region', { name })).toBeNull()
-    expect(screen.getByTestId('tiles').children).toHaveLength(2)
+    expect(screen.getByTestId('tiles').children).toHaveLength(3)
     expect(screen.getByTestId('tile-cpu-value').textContent).toBe('134%')
     expect(screen.getByTestId('tile-memory-value').textContent).toBe('960 MB')
     const pictures = screen.getAllByRole('img').map((one) => one.getAttribute('aria-label'))

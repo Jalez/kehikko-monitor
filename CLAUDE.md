@@ -20,7 +20,9 @@ what follows is how THIS repository is built, and the rules a change here keeps.
 | `src/health/heavy.ts` | Pure: heavy work (a typecheck, tests, a build, an install) an agent session started on its own — classified by program (`heavyWord`) and kind (`KIND_OF`, the protocol's `WORK_KINDS`), attributed by walking up to the agent CLI, skipped under a run of the provider of the protocol's `work.queue` service (its descriptor's `marks`); the one line said; the notice's body (`noticeBody`, `shortCommand`). Looked for every `HEAVY_MS` while watched. |
 | `src/health/held.ts` | Pure: which of that work is FLAGGED — only what the provider's descriptor wants handed to it (`wants`, judged by the protocol's `workWant`/`wantsQueued`, never Monitor's own numbers), with each run's CPU kept over time (`Held`) for the rule's `sustainedSeconds`. No provider, nothing flagged. |
 | `src/health/tell.ts` | Pure: which notices are due (`Told`): only with a `work.queue` provider that takes that kind of work, only to a session attributed by its id, once per run, once per session and kind in `TELL_AGAIN_MS`. The sampler finds the provider (`services.find`, every `PROVIDER_MS`) and sends each (`messages.notifySession`). |
-| `src/wire/use-health.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s; the Health view: two glance tiles (CPU, Memory), a crash line and the table as its own box grows (`detailOf`). |
+| `src/health/network.ts` | Pure and shared by the page, the network sampler and the door: the machine's network throughput (not Monitor's traffic) — reading `netstat -ibn` / `/proc/net/dev` and `nettop`, which interfaces count (`VIRTUAL`), rates from counter growth (`grew`: a 32-bit wrap counted round, a reset counts nothing), the 5-minute history (`kept`), who a busy process belongs to (`ownerOf`), every sentence (`networkSaid` for the `health` tool's `network` view). |
+| `health/network.ts` | The server's one `NetworkSampler`: the counters every 2 s, the busiest processes (`nettop`, macOS) every 10 s — only while asked in the last 30 s, as Health. Served at `GET /api/network`. |
+| `src/wire/use-health.ts`, `src/wire/use-network.ts`, `src/view/health.tsx` | The page reads `/api/health` every 5 s and `/api/network` every 2 s; the Health view: three glance tiles (CPU, Memory, and Network the row under them: one chart of two series, download and upload, a sparkline when narrow, the busiest processes under it only with room), a crash line and the table as its own box grows (`detailOf`). |
 | `src/header.ts` | The header items: pure functions of state. |
 | `src/inbox.ts` | The Inbox items: one per run of heavy work an agent started on its own (`heavyItems`), reported from the page (`useHeavyInbox`). |
 | `src/footer.ts` | The footer items: the traffic's readouts and, after the first sample, the health's (the worst module, CPU as a meter of the cores, memory). |
@@ -52,7 +54,10 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   (`shortCommand`), into the one notice to the session that started it, and nowhere else:
   never drawn, never in a snapshot or a tool's answer. Sample only while somebody looks
   (`WATCH_MS`), and keep only the ring in memory.
-- **Health is CPU and memory.** The disk is not measured (0.14.0): what
+- **Health is CPU, memory and the network.** The network is the machine's throughput, from
+  interface counters (no root, nothing native); it is not the traffic, which is Kehikot's record
+  of calls. A busy process is said by its executable's name and the module or agent session above
+  it, never by its command line. The disk is not measured (0.14.0): what
   worktrees take, and cleaning them up, is the Worktrees module's; the `health`
   tool answers `disk` with `goneSaid`. Restarts and call times are not
   sampled, drawn or told (0.10.0): the log is read only for crashes
@@ -73,7 +78,7 @@ what follows is how THIS repository is built, and the rules a change here keeps.
   `agents: true` on View, Range, Chart, Paused and Caller; never on Clear.
   Health shows only View, Paused and Tell agents. The view is not kept.
 - **The footer says what is going on now** (the header says how Monitor is set
-  up): the traffic's readouts and the health's, one item each, never in both rows.
+  up): the traffic's readouts, the health's and the network's ("↓ … · ↑ …"), one item each, never in both rows.
 - **Heavy work is not drawn on the page.** Each run is an Inbox item while it lasts
   (`src/inbox.ts`: `working`, `normal`, one per pid, reported whole when the runs change)
   and one footer item; the Health view keeps no line for it.

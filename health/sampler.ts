@@ -158,6 +158,8 @@ export class Sampler {
   private rings = new Map<string, Point[]>()
   private trees = new Map<string, number>()
   private selfPoint: Point | null = null
+  /** Which pids belong to which module at the last sample: for the network's busiest processes. */
+  private ownersMap = new Map<number, string>()
 
   private logs = new Map<string, { size: number; mtime: number; crashes: number[] }>()
   private logsAt = 0
@@ -187,6 +189,11 @@ export class Sampler {
     if (now - this.lastSample >= EVERY_MS - 500) await this.sample()
     this.schedule()
     return this.said()
+  }
+
+  /** Which pids belong to which Kehikot module (pid → id), as the last sample saw them. */
+  owners(): ReadonlyMap<number, string> {
+    return this.ownersMap
   }
 
   /** Stop the timer: for the tests, and for a server that stops. */
@@ -266,6 +273,7 @@ export class Sampler {
       }
       return { at: now, cpu: cpu / seconds, rss }
     }
+    const ownersMap = new Map<number, string>()
     for (const id of this.modules.keys()) {
       const pid = roots.get(id)
       const ring = this.rings.get(id) ?? []
@@ -274,12 +282,15 @@ export class Sampler {
         this.rings.set(id, [])
         continue
       }
-      this.trees.set(id, treeFor(pid).length)
+      const tree = treeFor(pid)
+      this.trees.set(id, tree.length)
+      for (const one of tree) ownersMap.set(one, id)
       const point = cost(pid)
       if (point) ring.push(point)
       this.rings.set(id, ring.slice(-RING))
     }
     for (const id of [...this.rings.keys()]) if (!this.modules.has(id)) this.rings.delete(id)
+    this.ownersMap = ownersMap
     this.selfPoint = cost(deps.pid) ?? this.selfPoint
     this.cpuBefore = new Map(this.procs.map((proc) => [proc.pid, proc.cpu]))
     this.sampleBefore = now
