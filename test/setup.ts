@@ -1,3 +1,6 @@
+/* The shared test preload (protocol 2.104.0): the running app's environment never reaches a test. */
+import 'kehikot-module-protocol/testing/setup'
+
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
 
 /* Bun's own networking, kept: a test that serves and fetches over loopback (the speed test's) needs Bun's
