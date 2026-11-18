@@ -204,6 +204,33 @@ describe('what the page holds as the stream goes on', () => {
     }
   })
 
+  test('a fresh start, with a source that pushes into the histories it handed out: every delta still adds its points', async () => {
+    /* The real sampler did this: its rings were pushed into after a snapshot held them, so the pump's
+       last snapshot already had the new point, every delta was empty, and a page opened on a fresh
+       start (whose first event has no points yet) kept empty CPU and Memory charts. */
+    const health: Snapshot = { ...snapshotOf(NOW), modules: snapshotOf(NOW).modules.map((m) => ({ ...m, points: [] as Snapshot['modules'][number]['points'] })) }
+    const network = net(NOW, 0)
+    const server = serve({ health: async () => health, network: async () => network }, 20)
+    globalThis.EventSource = eventSourceAt(`http://127.0.0.1:${server.port}/app`).Source
+    render(<Counts />)
+    const sample = (n: number) => {
+      health.at = NOW + n * SEC(5)
+      for (const m of health.modules) if (m.running) m.points.push({ at: health.at, cpu: 0.1, rss: 1e8 })
+      network.at = NOW + n * SEC(2)
+      network.points.push({ at: network.at, down: 1, up: 1 })
+    }
+    try {
+      await waitFor(() => expect(counts()).toBe('0:0:'), { timeout: 2000 })
+      sample(1)
+      await waitFor(() => expect(counts()).toBe('1:1:'), { timeout: 2000 })
+      sample(2)
+      sample(3)
+      await waitFor(() => expect(counts()).toBe('3:3:'), { timeout: 2000 })
+    } finally {
+      server.stop(true)
+    }
+  })
+
   test('the addresses the page follows are the server\'s, and absolute', async () => {
     const { EVENTS } = await import('../src/wire/use-health.ts')
     const { NET_EVENTS } = await import('../src/wire/use-network.ts')

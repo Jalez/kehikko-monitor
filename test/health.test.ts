@@ -264,6 +264,22 @@ describe('the sampler', () => {
     }
   })
 
+  test('a snapshot handed out is never changed by a later sample: the stream cuts what is new against it', async () => {
+    const sampler = new Sampler(deps)
+    try {
+      await sampler.snapshot()
+      clock += EVERY_MS
+      const before = await sampler.snapshot()
+      const held = before.modules.find((m) => m.id === 'kehikot.kanban')!.points.length
+      clock += EVERY_MS
+      const after = await sampler.snapshot()
+      expect(before.modules.find((m) => m.id === 'kehikot.kanban')!.points).toHaveLength(held)
+      expect(after.modules.find((m) => m.id === 'kehikot.kanban')!.points).toHaveLength(held + 1)
+    } finally {
+      sampler.stop()
+    }
+  })
+
   test('nothing is sampled when nobody asks', async () => {
     const before = ran.length
     const sampler = new Sampler(deps)
