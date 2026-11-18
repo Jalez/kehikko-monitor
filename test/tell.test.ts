@@ -8,7 +8,6 @@ import { HEAVY_MS, Sampler, type Deps } from '../health/sampler.ts'
 import { shortCommand } from '../src/health/heavy.ts'
 import { TELL_AGAIN_MS } from '../src/health/tell.ts'
 import { headerItems, pressed } from '../src/header.ts'
-import { tellUrl } from '../src/wire/use-health.ts'
 
 /**
  * Telling the agent session that started heavy work on its own how to hand it to the work queue here —
@@ -300,8 +299,6 @@ describe('the setting', () => {
     expect(headerItems({ ...base, tell: false })).toContainEqual({ kind: 'toggle', id: 'tell', label: 'Tell agents', agents: false, checked: false })
     expect(pressed('tell', false, [])).toEqual({ tell: false })
     expect(typeof pressed('tell', 'x', [])).toBe('string')
-    expect(tellUrl('/api/health', false)).toBe('/api/health?tell=0')
-    expect(tellUrl('/api/health', true)).toBe('/api/health')
   })
 })
 

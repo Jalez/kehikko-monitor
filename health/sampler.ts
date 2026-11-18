@@ -10,7 +10,7 @@ import { ID } from '../manifest.ts'
 import { heavyOutside, parseProcLines, sessionFrom, type Outside } from '../src/health/heavy.ts'
 import { Held, wanted } from '../src/health/held.ts'
 import { Told } from '../src/health/tell.ts'
-import { crashesIn, parseListeners, parsePs, treeOf, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
+import { crashesIn, parseListeners, parsePs, RING, treeOf, type ModuleHealth, type Point, type Proc, type Snapshot } from '../src/health/model.ts'
 
 /**
  * The health of the processes Kehikot runs on this computer, sampled by Monitor's server.
@@ -45,9 +45,9 @@ import { crashesIn, parseListeners, parsePs, treeOf, type ModuleHealth, type Poi
  * Nothing is written anywhere.
  */
 
+export { RING }
 export const EVERY_MS = 5_000
 export const WATCH_MS = 30_000
-export const RING = 60
 export const LISTEN_MS = 15_000
 export const REGISTRY_MS = 30_000
 export const LOGS_MS = 60_000

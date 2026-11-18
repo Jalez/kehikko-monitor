@@ -5,6 +5,7 @@ import { NETWORK as NET_SAMPLER } from './health/network.ts'
 import { QUALITY } from './health/quality.ts'
 import { SPEED as SPEED_TEST } from './health/speed.ts'
 import { SAMPLER } from './health/sampler.ts'
+import { makeStream } from './live.ts'
 import { DECLARED, ID, VERSION } from './manifest.ts'
 import { GONE_VIEWS, goneSaid, HEALTH_VIEWS, healthSaid, type HealthView, type Snapshot } from './src/health/model.ts'
 import { networkSaid, type NetSnapshot } from './src/health/network.ts'
@@ -67,6 +68,9 @@ export const SPEED: { start: () => void; cancel: () => void; state: () => unknow
   cancel: () => SPEED_TEST.cancel(),
   state: () => SPEED_TEST.state(),
 }
+
+/** The page's event streams: health and network, pushed while a page follows (`live.ts`). */
+export const stream = makeStream(() => ({ health: (tell) => HEALTH.snapshot(tell), network: () => NETWORK.snapshot() }))
 
 const ok = (body: unknown): Reply => ({ status: 200, body })
 const bad = (why: string, status = 400): Reply => ({ status, body: { ok: false, error: why } })

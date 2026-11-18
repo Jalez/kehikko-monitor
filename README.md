@@ -19,7 +19,7 @@ again and again, so redundant polling stands out.
 - **Health.** Choose View › Health: how much CPU and memory each module and
   Kehikot use (sampled every 5 seconds). Two tiles (CPU, Memory) at a glance, one column
   or two side by side as the container widens, and under them Network: this
-  computer's download and upload speed in one chart, read every 2 seconds, a
+  computer's download and upload speed in one chart, kept current as Monitor pushes it, a
   sparkline in a small container, the busiest programs under it with room (macOS).
   Its head says whether the internet connection is good — Good, Fair, Poor or
   Offline, with the round trip and loss ("Good · 24 ms · 0% loss") — from a

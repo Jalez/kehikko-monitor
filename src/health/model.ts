@@ -149,6 +149,9 @@ export function mostWithin(times: readonly number[], windowMs: number, since = 0
  * ------------------------------------------------------------------ */
 
 /** One sample of one module's processes. */
+/** How many samples of a module are held: the server's ring and the page's. */
+export const RING = 60
+
 export interface Point {
   at: number
   /** CPU used since the sample before, in cores: 1 is one core busy the whole time. */

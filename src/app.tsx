@@ -74,7 +74,7 @@ export function App() {
   const traffic = useTraffic(host.where === 'hosted' ? host.request : null, resting, clearedAt)
   /* Read whatever the view: the footer says the health in both. */
   const health = useHealth(host.where === 'hosted', resting, undefined, undefined, tell)
-  /* The machine's network throughput, every 2 s: the Health view's Network tile and a footer readout, in both views. */
+  /* The machine's network throughput, as the server pushes it: the Health view's Network tile and a footer readout, in both views. */
   const network = useNetwork(host.where === 'hosted', resting)
   /* Each run of heavy work an agent started on its own is an Inbox item while it runs, and so is a connection Poor or Offline for over a minute (`src/inbox.ts`). */
   useInbox(host.where === 'hosted' ? host.activity : undefined, health.snapshot.outside, health.snapshot.provider, network.net.quality)
