@@ -33,7 +33,8 @@ export async function readHealth(fetcher: Fetch, url: string): Promise<Snapshot>
 export const DETACHED = 'Monitor’s server stopped answering. Health will come back when it does.'
 
 /** The stream's address with the person's "Tell agents" on it: `tell=0` when it is off. */
-export const EVENTS = './api/health/events'
+/** Absolute, never relative: a host frames the page at whatever path it likes (`/app`, `/app/`, with a query), and a relative address then lands off the stream. `test/contract.test.tsx` holds it. */
+export const EVENTS = '/api/health/events'
 
 /** What `subscribe` is: one function for every render, so the effect is not started again on each. */
 export type Follow = typeof subscribe

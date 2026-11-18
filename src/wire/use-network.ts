@@ -42,7 +42,8 @@ export async function readNetwork(fetcher: (url: string) => Promise<{ ok: boolea
   return { ...emptyNet(), ...body } as NetSnapshot
 }
 
-export const NET_EVENTS = './api/network/events'
+/** Absolute, for the same reason as `EVENTS`. */
+export const NET_EVENTS = '/api/network/events'
 
 export function useNetwork(on: boolean, paused: boolean, follow: Follow = subscribe, url: string = NET_EVENTS): Network & { speed: (action: SpeedAction) => void } {
   const [network, setNetwork] = useState<Network>({ net: emptyNet(), problem: null })

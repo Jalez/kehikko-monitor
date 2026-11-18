@@ -234,7 +234,7 @@ describe('the page listens only while it is on screen and not paused', () => {
     const view = render(<Probe on paused follow={f.follow} />)
     expect(f.opened).toEqual([])
     view.rerender(<Probe on paused={false} follow={f.follow} />)
-    expect(f.opened.map((o) => o.url)).toEqual(['./api/health/events', './api/network/events'])
+    expect(f.opened.map((o) => o.url)).toEqual(['/api/health/events', '/api/network/events'])
     view.rerender(<Probe on paused follow={f.follow} />)
     expect(f.opened.every((o) => o.closed)).toBe(true)
     const count = f.opened.length
