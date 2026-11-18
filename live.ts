@@ -76,7 +76,9 @@ function schedule<S>(topic: string, one: Pump<S>): void {
     try {
       const now = await one.read()
       const said = one.say(one.last, now)
-      one.last = now
+      /* A copy: what is new is cut against what was published, and a source that changes the
+         snapshot it handed out (an array pushed into) must not change that too. */
+      one.last = structuredClone(now)
       if (said) publish(topic, said)
     } catch {
       /* A sample that failed is a sample missed: the next tick looks again. */
@@ -104,7 +106,7 @@ export function makeStream(sources: () => Sources, every: { health: number; netw
         initial: async () => {
           const snapshot = await one.read()
           /* No pump has said anything yet: nobody else holds a snapshot, so this is where the next one is cut from. */
-          if (one.last === null) one.last = snapshot
+          if (one.last === null) one.last = structuredClone(snapshot)
           queueMicrotask(() => schedule(topic, one))
           return { more: false, snapshot } satisfies Event<Snapshot>
         },
@@ -116,7 +118,7 @@ export function makeStream(sources: () => Sources, every: { health: number; netw
         topic: 'network',
         initial: async () => {
           const snapshot = await one.read()
-          if (one.last === null) one.last = snapshot
+          if (one.last === null) one.last = structuredClone(snapshot)
           queueMicrotask(() => schedule('network', one))
           return { more: false, snapshot } satisfies Event<NetSnapshot>
         },

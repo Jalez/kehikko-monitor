@@ -286,8 +286,10 @@ export class Sampler {
       this.trees.set(id, tree.length)
       for (const one of tree) ownersMap.set(one, id)
       const point = cost(pid)
-      if (point) ring.push(point)
-      this.rings.set(id, ring.slice(-RING))
+      /* A new array, never a push: the ring held before was handed out in a snapshot, and the stream
+         cuts what is new against that snapshot (`live.ts`). Pushed into, it already held the new point,
+         so nothing was new and the CPU and Memory charts of a page opened on a fresh start stayed empty. */
+      this.rings.set(id, (point ? [...ring, point] : ring).slice(-RING))
     }
     for (const id of [...this.rings.keys()]) if (!this.modules.has(id)) this.rings.delete(id)
     this.ownersMap = ownersMap
