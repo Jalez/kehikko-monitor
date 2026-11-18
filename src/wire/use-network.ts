@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ask } from 'kehikot-module-protocol/client'
+import { ask, subscribe } from 'kehikot-module-protocol/client'
 
 import { emptyNet, type NetSnapshot } from '../health/network.ts'
+import { applyNet, isEvent, type Event } from '../health/live.ts'
 import { emptyQuality, type SpeedState } from '../health/quality.ts'
-import type { Fetch } from './use-health.ts'
+import { DETACHED, type Follow } from './use-health.ts'
+export type { Fetch } from './use-health.ts'
 
 /**
- * The machine's network throughput, from Monitor's own server (`GET /api/network`), every `NET_EVERY_MS`
- * while the page is open and not paused. The server reads the counters only while it is asked, so a
- * closed page stops that too.
+ * The machine's network throughput, pushed by Monitor's own server over one event stream
+ * (`/api/network/events`, `live.ts`) while the page is on screen and not paused: the whole snapshot as
+ * it opens, then only the new points, and nothing when nothing moved. The page asks nothing on a
+ * clock. (It read `/api/network` every 2 s, the whole history each time.)
  */
-
-export const NET_EVERY_MS = 2000
 
 export interface Network {
   net: NetSnapshot
@@ -32,8 +33,8 @@ export async function pressSpeed(action: SpeedAction, asker: Asker = ask as unkn
   return speed
 }
 
-/** One read. Pure but for `fetch`, so a test drives it. */
-export async function readNetwork(fetcher: Fetch, url: string): Promise<NetSnapshot> {
+/** One plain read (`GET /api/network`), kept for the tests. Pure but for `fetch`. */
+export async function readNetwork(fetcher: (url: string) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }>, url: string): Promise<NetSnapshot> {
   const reply = await fetcher(url)
   if (!reply.ok) throw new Error(`Monitor’s server answered ${reply.status}.`)
   const body = (await reply.json()) as Partial<NetSnapshot> | null
@@ -41,17 +42,9 @@ export async function readNetwork(fetcher: Fetch, url: string): Promise<NetSnaps
   return { ...emptyNet(), ...body } as NetSnapshot
 }
 
-function defaultUrl(): string {
-  try {
-    return new URL('/api/network', location.href).toString()
-  } catch {
-    return '/api/network'
-  }
-}
+export const NET_EVENTS = './api/network/events'
 
-const browserFetch: Fetch = (url) => fetch(url)
-
-export function useNetwork(on: boolean, paused: boolean, fetcher: Fetch = browserFetch, url: string = defaultUrl()): Network & { speed: (action: SpeedAction) => void } {
+export function useNetwork(on: boolean, paused: boolean, follow: Follow = subscribe, url: string = NET_EVENTS): Network & { speed: (action: SpeedAction) => void } {
   const [network, setNetwork] = useState<Network>({ net: emptyNet(), problem: null })
   /* The test's state as the server answered the press, at once: the next read carries it on. */
   const speed = useCallback((action: SpeedAction) => {
@@ -65,23 +58,19 @@ export function useNetwork(on: boolean, paused: boolean, fetcher: Fetch = browse
   }, [])
   useEffect(() => {
     if (!on || paused) return
-    let live = true
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const tick = async () => {
-      try {
-        const net = await readNetwork(fetcher, url)
-        if (live) setNetwork({ net, problem: null })
-      } catch (error) {
-        /* An older server has no /api/network: the tile says so, and nothing else changes. */
-        if (live) setNetwork((was) => ({ ...was, problem: error instanceof Error ? error.message : String(error) }))
-      }
-      if (live) timer = setTimeout(tick, NET_EVERY_MS)
-    }
-    void tick()
-    return () => {
-      live = false
-      if (timer) clearTimeout(timer)
-    }
-  }, [on, paused, fetcher, url])
+    return follow<Event<NetSnapshot>>(
+      url,
+      (event) => {
+        if (!isEvent(event, 'points')) return setNetwork((was) => ({ ...was, problem: 'Monitor’s server answered with something this page cannot read. Reload it.' }))
+        setNetwork((was) => ({ net: applyNet(was.net, event as unknown as Event<NetSnapshot>), problem: null }))
+      },
+      {
+        probe: true,
+        onAttachment: (attachment) => {
+          if (attachment === 'detached') setNetwork((was) => ({ ...was, problem: DETACHED }))
+        },
+      },
+    )
+  }, [on, paused, follow, url])
   return { ...network, speed }
 }
